@@ -16,6 +16,7 @@ import { Paths, File, Directory } from 'expo-file-system';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
+import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
 import { deriveColorFromEmoji, deriveColorFromName, AMBIENT_SWATCHES } from '../utils/ambientColor';
 
@@ -100,6 +101,7 @@ function parseWikiText(text: string): Array<{ name: string; coreSetting: string 
 }
 
 export default function CreateCharacterScreen({ navigation }: Props) {
+  const { colors } = useTheme();
   const [name, setName] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [coreSetting, setCoreSetting] = useState('');

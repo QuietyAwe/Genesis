@@ -12,11 +12,13 @@ import {
 import { useNavigation, useRoute } from '@react-navigation/native';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useStageStore } from '../stores/useStageStore';
+import { useTheme } from '../hooks/useTheme';
 import { Character, World } from '../types';
-import { colors, spacing, typography } from '../constants/theme';
+import { spacing, typography } from '../constants/theme';
 import * as stageDao from '../services/db/stageDao';
 
 export default function StageSetupScreen() {
+  const { colors } = useTheme();
   const navigation = useNavigation();
   const route = useRoute<any>();
   const editStageId = route.params?.stageId as string | undefined;
@@ -28,7 +30,6 @@ export default function StageSetupScreen() {
   const [selectedWorldIds, setSelectedWorldIds] = useState<string[]>([]);
   const [selectedCharIds, setSelectedCharIds] = useState<string[]>([]);
 
-  // Defined before useEffect to avoid hoisting issues with lint
   const loadEditStage = async (id: string) => {
     const stages = await stageDao.getAllStages();
     const stage = stages.find((s) => s.id === id);
@@ -40,7 +41,6 @@ export default function StageSetupScreen() {
 
   useEffect(() => {
     useArchiveStore.getState().load();
-
     if (editStageId) {
       loadEditStage(editStageId);
     }
@@ -70,14 +70,12 @@ export default function StageSetupScreen() {
 
     try {
       if (editStageId) {
-        // Update existing stage
         await stageDao.updateStage(editStageId, {
           name: stageName.trim(),
           worldIds: selectedWorldIds,
           characterIds: selectedCharIds,
           updatedAt: Date.now(),
         });
-        // Reload the stage in the store
         await useStageStore.getState().loadStage(editStageId);
         Alert.alert('成功', '舞台已更新');
       } else {
@@ -96,7 +94,12 @@ export default function StageSetupScreen() {
     const isImage = (item.avatar || '').startsWith('file://') || (item.avatar || '').startsWith('data:') || (item.avatar || '').startsWith('http');
     return (
       <TouchableOpacity
-        style={[styles.charCard, isSelected && styles.charCardSelected]}
+        key={item.id}
+        style={[
+          styles.charCard,
+          { borderColor: colors.separator, backgroundColor: colors.surface },
+          isSelected && { borderColor: colors.text.primary, backgroundColor: colors.surface },
+        ]}
         onPress={() => toggleChar(item.id)}
       >
         <View style={styles.charCardHeader}>
@@ -105,25 +108,25 @@ export default function StageSetupScreen() {
           ) : (
             <Text style={styles.charAvatar}>{item.avatar}</Text>
           )}
-          <Text style={styles.charName}>{item.name}</Text>
-          {isSelected && <Text style={styles.checkmark}>✓</Text>}
+          <Text style={[styles.charName, { color: colors.text.primary }]}>{item.name}</Text>
+          {isSelected && <Text style={[styles.checkmark, { color: colors.text.primary }]}>✓</Text>}
         </View>
         {item.coreSetting ? (
-          <Text numberOfLines={2} style={styles.charSetting}>{item.coreSetting}</Text>
+          <Text numberOfLines={2} style={[styles.charSetting, { color: colors.text.secondary }]}>{item.coreSetting}</Text>
         ) : null}
       </TouchableOpacity>
     );
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: colors.background }]}>
       <View style={styles.header}>
         <TouchableOpacity onPress={() => (navigation as any).goBack()}>
-          <Text style={styles.backText}>‹ 返回</Text>
+          <Text style={[styles.backText, { color: colors.text.secondary }]}>‹ 返回</Text>
         </TouchableOpacity>
-        <Text style={styles.headerTitle}>{editStageId ? '编辑舞台' : '新建舞台'}</Text>
+        <Text style={[styles.headerTitle, { color: colors.text.primary }]}>{editStageId ? '编辑舞台' : '新建舞台'}</Text>
         <TouchableOpacity onPress={handleCreate}>
-          <Text style={styles.saveText}>保存</Text>
+          <Text style={[styles.saveText, { color: colors.text.primary }]}>保存</Text>
         </TouchableOpacity>
       </View>
 
@@ -134,40 +137,46 @@ export default function StageSetupScreen() {
         contentContainerStyle={styles.listContent}
         ListHeaderComponent={
           <>
-            {/* Stage name */}
-            <Text style={styles.label}>舞台名称</Text>
+            <Text style={[styles.label, { color: colors.text.tertiary }]}>舞台名称</Text>
             <TextInput
-              style={styles.nameInput}
+              style={[styles.nameInput, { color: colors.text.primary, borderColor: colors.separator }]}
               value={stageName}
               onChangeText={setStageName}
               placeholder="例如：第一幕、迷雾之夜..."
               placeholderTextColor={colors.text.tertiary}
             />
 
-            {/* World selector */}
             {archiveWorlds.length > 0 && (
               <>
-                <Text style={styles.label}>关联世界观（可多选）</Text>
+                <Text style={[styles.label, { color: colors.text.tertiary }]}>关联世界观（可多选）</Text>
                 {archiveWorlds.map((w: World) => {
                   const isSelected = selectedWorldIds.includes(w.id);
                   return (
                     <TouchableOpacity
                       key={w.id}
-                      style={[styles.worldChip, isSelected && styles.worldChipSelected]}
+                      style={[
+                        styles.worldChip,
+                        { borderColor: colors.separator, backgroundColor: colors.surface },
+                        isSelected && { borderColor: colors.text.primary, backgroundColor: colors.text.primary },
+                      ]}
                       onPress={() => toggleWorld(w.id)}
                     >
                       <Text style={styles.worldChipEmoji}>{w.emoji}</Text>
-                      <Text style={[styles.worldChipName, isSelected && styles.worldChipNameSelected]}>{w.name}</Text>
-                      {isSelected && <Text style={styles.worldChipCheck}>✓</Text>}
+                      <Text style={[
+                        styles.worldChipName,
+                        { color: colors.text.secondary },
+                        isSelected && { color: '#FFFFFF' },
+                      ]}>{w.name}</Text>
+                      {isSelected && <Text style={[styles.worldChipCheck, { color: colors.text.primary }]}>✓</Text>}
                     </TouchableOpacity>
                   );
                 })}
               </>
             )}
 
-            <Text style={styles.label}>参与角色</Text>
+            <Text style={[styles.label, { color: colors.text.tertiary }]}>参与角色</Text>
             {archiveChars.length === 0 && (
-              <Text style={styles.emptyHint}>暂无角色，请先去图鉴创建</Text>
+              <Text style={[styles.emptyHint, { color: colors.text.tertiary }]}>暂无角色，请先去图鉴创建</Text>
             )}
           </>
         }
@@ -178,10 +187,7 @@ export default function StageSetupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1 },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -190,40 +196,17 @@ const styles = StyleSheet.create({
     paddingTop: spacing.xxl,
     paddingBottom: spacing.md,
   },
-  headerTitle: {
-    ...typography.heading,
-    color: colors.text.primary,
-  },
-  backText: {
-    ...typography.body,
-    color: colors.text.secondary,
-  },
-  saveText: {
-    ...typography.body,
-    color: colors.text.primary,
-    fontWeight: '600',
-  },
-  listContent: {
-    paddingHorizontal: spacing.lg,
-  },
-  label: {
-    ...typography.subheading,
-    color: colors.text.tertiary,
-    marginBottom: spacing.sm,
-    marginTop: spacing.lg,
-  },
+  headerTitle: { ...typography.heading },
+  backText: { ...typography.body },
+  saveText: { ...typography.body, fontWeight: '600' },
+  listContent: { paddingHorizontal: spacing.lg },
+  label: { ...typography.subheading, marginBottom: spacing.sm, marginTop: spacing.lg },
   nameInput: {
     ...typography.body,
-    color: colors.text.primary,
     borderWidth: 1,
-    borderColor: colors.separator,
     borderRadius: 8,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-  },
-  worldRow: {
-    flexDirection: 'row',
-    gap: spacing.sm,
   },
   worldChip: {
     flexDirection: 'row',
@@ -233,80 +216,27 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     borderRadius: 8,
     borderWidth: 1,
-    borderColor: colors.separator,
-    backgroundColor: colors.surface,
     marginBottom: spacing.sm,
   },
-  worldChipSelected: {
-    borderColor: colors.text.primary,
-    backgroundColor: colors.text.primary,
-  },
-  worldChipEmoji: {
-    fontSize: 16,
-  },
-  worldChipName: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    flex: 1,
-  },
-  worldChipNameSelected: {
-    color: '#FFFFFF',
-    fontWeight: '500',
-  },
-  worldChipCheck: {
-    fontSize: 16,
-    color: colors.text.primary,
-    fontWeight: '600',
-  },
+  worldChipEmoji: { fontSize: 16 },
+  worldChipName: { ...typography.caption, flex: 1 },
+  worldChipCheck: { fontSize: 16, fontWeight: '600' },
   charCard: {
     borderRadius: 12,
     padding: spacing.md,
     marginBottom: spacing.md,
     borderWidth: 1,
-    borderColor: colors.separator,
-    backgroundColor: colors.surface,
-  },
-  charCardSelected: {
-    borderColor: colors.text.primary,
-    backgroundColor: '#F0F0F0',
   },
   charCardHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     marginBottom: spacing.xs,
   },
-  charAvatar: {
-    fontSize: 20,
-    marginRight: spacing.sm,
-  },
-  charAvatarImage: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    marginRight: spacing.sm,
-  },
-  charName: {
-    ...typography.subheading,
-    color: colors.text.primary,
-    flex: 1,
-  },
-  checkmark: {
-    fontSize: 18,
-    color: colors.text.primary,
-    fontWeight: '600',
-  },
-  charSetting: {
-    ...typography.caption,
-    color: colors.text.secondary,
-    lineHeight: 18,
-  },
-  emptyHint: {
-    ...typography.caption,
-    color: colors.text.tertiary,
-    textAlign: 'center',
-    marginTop: spacing.xl,
-  },
-  bottomSpacer: {
-    height: spacing.xxl,
-  },
+  charAvatar: { fontSize: 20, marginRight: spacing.sm },
+  charAvatarImage: { width: 28, height: 28, borderRadius: 14, marginRight: spacing.sm },
+  charName: { ...typography.subheading, flex: 1 },
+  checkmark: { fontSize: 18, fontWeight: '600' },
+  charSetting: { ...typography.caption, lineHeight: 18 },
+  emptyHint: { ...typography.caption, textAlign: 'center', marginTop: spacing.xl },
+  bottomSpacer: { height: spacing.xxl },
 });

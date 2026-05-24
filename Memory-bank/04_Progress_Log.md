@@ -1,5 +1,55 @@
 # 进度日志 (Progress Log)
 
+## 2026-05-24: 沉浸夜间模式 + 剧场沉浸态 + 流式输出动画 + 振动反馈
+
+### 1. 沉浸夜间模式 (Dark Mode)
+- `src/hooks/useTheme.ts`: 新建 `useTheme` hook，基于 `useColorScheme()` 自动跟随系统深浅色模式
+  - 深色模式：纯黑背景 `#000000`，主文本 `#D1D5DB`（低对比度浅灰），无高强度白光
+  - 浅色模式：保持原有白色背景 + 深色文本
+- 所有屏幕已接入 `useTheme`：ArchiveScreen, ChroniclesScreen, SettingsScreen, StageSetupScreen, CreateCharacterScreen, CreateWorldScreen, CharacterDetailScreen, WorldDetailScreen, PromptBlueprintScreen, StageScreen
+  - 采用 "双源" 策略：JSX 使用 `const { colors } = useTheme()` 获取动态颜色；StyleSheet 保留静态 `colors` 引用作为 fallback，JSX 中通过 inline style 覆盖
+
+### 2. 剧场沉浸态 (Immersive Stage)
+- `src/screens/StageScreen.tsx`:
+  - 新增 `headerAnim` 和 `inputAnim` 两个 `Animated.Value` 控制顶部 Header 和底部输入栏的显隐
+  - `handleScroll` 监听 FlatList 滚动：向下滚动 >60px 时平滑隐藏 UI；向上滚动 >60px 时重新淡入
+  - `handleTapToReveal`：在沉浸式模式下轻触屏幕空白处，UI 淡入恢复
+  - 动画使用 `Animated.parallel` + `Animated.timing`，duration 250ms，opacity + translateY 双重过渡
+
+### 3. 流式输出动画 (Streaming Animation)
+- `src/screens/StageScreen.tsx`: 新增 `StreamingText` 组件
+  -  incoming SSE 字符逐个以 80ms duration 的 `Animated.timing` 淡入 + 轻微上移（translateY: 4→0）
+  - 每个字符有独立的 `Animated.Value`，确保平滑的逐字跃出效果
+  - 流式结束后，字符保持完全渲染状态
+
+### 4. 振动反馈 (Haptic Feedback)
+- `src/utils/haptics.ts`: 新建轻量级封装，fallback 静默（Web 端不可用）
+  - `lightImpact()` — 轻微触感（发送消息、删除分支）
+  - `mediumImpact()` — 中等触感（自动推演、重新生成）
+  - `selection()` — 选择触感（切换身份、切换分支、点击角色头像）
+  - `notification()` — 通知级触感（成功/警告/错误）
+- `src/screens/StageScreen.tsx`: 关键操作集成振动
+  - 发送消息 → lightImpact
+  - 点击角色头像（Force Speaker）→ selection
+  - 自动推演 → mediumImpact
+  - 身份切换 → selection
+  - 左滑重新生成 → mediumImpact
+  - 左滑删除 → lightImpact
+  - 左滑切换分支 → selection
+
+### 新增 Log Tag
+| 模块 | Log Tag | 说明 |
+|------|---------|------|
+| 振动反馈 | `[Haptics]` | Web fallback 触发时静默，不打印日志 |
+
+### 遗留问题
+- [ ] `useStageStore.web.ts` 中 `stageId` unused warning（需重命名为 `_stageId`）
+- [ ] `useStageStore.ts` 中 `activeBranchId` unused warning
+- [ ] 深色模式在 Expo web 端的 `useColorScheme` 兼容性待验证
+- [ ] 流式动画在长文本场景下的内存占用需观察（每个字符一个 Animated.Value）
+
+---
+
 ## 2026-05-24: ESLint 修复 + 项目初始化补齐
 
 ### ESLint 修复 (0 errors, 17 warnings)
