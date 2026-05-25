@@ -50,6 +50,17 @@
 
 ---
 
+### UX 修复与优化 (Post-review fixes)
+- **剧场沉浸态**:
+  - `isImmersive` 从 `useRef` 改为 `useState + useRef` 双源：state 控制 `pointerEvents` 确保交互随动画切换；ref 用于 scroll handler 避免闭包陷阱
+  - 移除 FlatList 的 `onTouchEnd`（与消息左滑手势冲突），改用独立的 `Pressable` 全屏覆盖层 + `onScrollToTop` 作为揭示触发
+  - 新增 "near bottom" 守卫：当用户靠近底部（观看实时推演）时，自动滚动不触发 UI 隐藏；只有向上翻阅历史时才隐藏
+- **流式输出动画**:
+  - 重写 `StreamingText`：从"每个字符一个 Animated.Value"（500+ 次分配、内存泄漏）改为"整个文本块单次 opacity 脉冲"，视觉上仍有"活"的感觉，性能开销趋近于零
+- **编译状态**: `tsc` 全绿, `lint` 0 errors, 17 warnings（均为 pre-existing）
+
+---
+
 ## 2026-05-24: ESLint 修复 + 项目初始化补齐
 
 ### ESLint 修复 (0 errors, 17 warnings)
