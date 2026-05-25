@@ -6,6 +6,7 @@ import {
   KeyboardAvoidingView,
   PanResponder,
   Platform,
+  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -23,8 +24,6 @@ import { colors, spacing, typography } from '../constants/theme';
 import { exportToMarkdown, copyToClipboard } from '../services/export/markdown';
 import * as stageDao from '../services/db/stageDao';
 import { lightImpact, mediumImpact, selection } from '../utils/haptics';
-
-const SIDEBAR_WIDTH = 120; // Width of action sidebar in px
 
 export default function StageScreen() {
   const { colors } = useTheme();
@@ -59,39 +58,52 @@ export default function StageScreen() {
   const [allStages, setAllStages] = useState<Stage[]>([]);
   const flatListRef = useRef<FlatList>(null);
 
-  // Immersive mode: hide header/input on scroll down, show on tap
+  // Immersive mode: hide header/input on scroll down, show on tap/scroll-to-top
   const headerAnim = useRef(new Animated.Value(0)).current; // 0 = visible, 1 = hidden
   const inputAnim = useRef(new Animated.Value(0)).current;
-  const scrollOffset = useRef(0);
   const lastScrollY = useRef(0);
-  const isImmersive = useRef(false);
+  const immersiveRef = useRef(false);
+  const [isImmersive, setIsImmersive] = useState(false);
 
   const HIDE_THRESHOLD = 60; // px of scroll before triggering hide
 
   const animateUI = useCallback((visible: boolean) => {
     const toValue = visible ? 0 : 1;
+    immersiveRef.current = !visible;
+    setIsImmersive(!visible);
     Animated.parallel([
       Animated.timing(headerAnim, { toValue, duration: 250, useNativeDriver: true }),
       Animated.timing(inputAnim, { toValue, duration: 250, useNativeDriver: true }),
     ]).start();
-    isImmersive.current = !visible;
   }, [headerAnim, inputAnim]);
 
   const handleScroll = useCallback((event: any) => {
-    const currentY = event.nativeEvent.contentOffset.y;
+    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
+    const currentY = contentOffset.y;
     const dy = currentY - lastScrollY.current;
+    // Check if user is near the bottom (within 100px) — if so, they're watching live, don't hide UI
+    const isNearBottom = currentY + layoutMeasurement.height >= contentSize.height - 100;
 
-    if (dy > HIDE_THRESHOLD && !isImmersive.current) {
+    if (dy > HIDE_THRESHOLD && !immersiveRef.current && !isNearBottom) {
+      // Only hide when user scrolls UP through history (away from bottom)
       animateUI(false);
-    } else if (dy < -HIDE_THRESHOLD && isImmersive.current) {
+    } else if (dy < -HIDE_THRESHOLD && immersiveRef.current) {
+      // Always show when scrolling back down
       animateUI(true);
     }
     lastScrollY.current = currentY;
-    scrollOffset.current = currentY;
+  }, [animateUI]);
+
+  // Reset immersive when scrolling to top
+  const handleScrollToTop = useCallback((event: any) => {
+    const y = event.nativeEvent.contentOffset.y;
+    if (y < 20 && immersiveRef.current) {
+      animateUI(true);
+    }
   }, [animateUI]);
 
   const handleTapToReveal = useCallback(() => {
-    if (isImmersive.current) {
+    if (immersiveRef.current) {
       animateUI(true);
     }
   }, [animateUI]);
@@ -357,7 +369,7 @@ export default function StageScreen() {
             zIndex: 10,
           },
         ]}
-        pointerEvents={isImmersive.current ? 'none' : 'auto'}
+        pointerEvents={isImmersive ? 'none' : 'auto'}
       >
         <TouchableOpacity style={styles.stageNameBtn} onPress={openStageSwitcher} onLongPress={() => setDebugVisible(true)} delayLongPress={500}>
           <Text style={styles.stageName}>{stage.name}</Text>
@@ -425,7 +437,7 @@ export default function StageScreen() {
         contentContainerStyle={styles.listContent}
         onScroll={handleScroll}
         scrollEventThrottle={16}
-        onTouchEnd={handleTapToReveal}
+        onScrollToTop={handleScrollToTop}
         ListFooterComponent={
           streamingContent ? (
             <MessageItem
@@ -453,7 +465,7 @@ export default function StageScreen() {
             ],
           },
         ]}
-        pointerEvents={isImmersive.current ? 'none' : 'auto'}
+        pointerEvents={isImmersive ? 'none' : 'auto'}
       >
         {characters.map((c) => {
           const isSelected = selectedCharacter?.id === c.id;
@@ -486,7 +498,7 @@ export default function StageScreen() {
             ],
           },
         ]}
-        pointerEvents={isImmersive.current ? 'none' : 'auto'}
+        pointerEvents={isImmersive ? 'none' : 'auto'}
       >
         <TouchableOpacity
           style={styles.identityBtn}
@@ -549,7 +561,7 @@ export default function StageScreen() {
               ],
             },
           ]}
-          pointerEvents={isImmersive.current ? 'none' : 'auto'}
+          pointerEvents={isImmersive ? 'none' : 'auto'}
           onStartShouldSetResponder={() => true}
         >
           <TouchableOpacity
@@ -581,6 +593,11 @@ export default function StageScreen() {
             <Text style={styles.branchNavText}>›</Text>
           </TouchableOpacity>
         </Animated.View>
+      )}
+
+      {/* Tap-to-reveal overlay — only visible in immersive mode */}
+      {isImmersive && (
+        <Pressable style={styles.immersiveOverlay} onPress={handleTapToReveal} />
       )}
 
       {/* Stage switcher overlay */}
@@ -849,65 +866,28 @@ function MessageItem({
 }
 
 /**
- * Renders text with a smooth character-by-character reveal animation.
- * New characters fade in one at a time as content arrives.
+ * Renders streaming text with a subtle "live" feel — text pulses slightly
+ * as new content arrives, with a blinking cursor dot.
  */
 function StreamingText({ text }: { text: string }) {
-  const { colors } = useTheme();
-  const [revealedCount, setRevealedCount] = useState(0);
-  const animRefs = useRef<Map<number, Animated.Value>>(new Map());
+  const opacity = useRef(new Animated.Value(1)).current;
+  const prevLength = useRef(0);
 
-  // Track new characters and animate them in
   useEffect(() => {
-    if (text.length === 0) return;
-
-    // Reveal all characters that have arrived
-    const targetCount = text.length;
-    if (revealedCount < targetCount) {
-      // Animate each new character
-      for (let i = revealedCount; i < targetCount; i++) {
-        if (!animRefs.current.has(i)) {
-          const anim = new Animated.Value(0);
-          animRefs.current.set(i, anim);
-          Animated.timing(anim, {
-            toValue: 1,
-            duration: 80,
-            useNativeDriver: true,
-          }).start();
-        }
-      }
-      setRevealedCount(targetCount);
+    if (text.length > prevLength.current && text.length > 0) {
+      // Subtle pulse on new content arrival
+      prevLength.current = text.length;
+      Animated.sequence([
+        Animated.timing(opacity, { toValue: 0.7, duration: 60, useNativeDriver: true }),
+        Animated.timing(opacity, { toValue: 1, duration: 120, useNativeDriver: true }),
+      ]).start();
     }
-  }, [text, revealedCount]);
+  }, [text, opacity]);
 
-  // Render revealed characters with their individual animations
-  const chars = text.slice(0, revealedCount);
   return (
-    <View style={{ flexDirection: 'row', flexWrap: 'wrap' }}>
-      {chars.split('').map((char, i) => {
-        const anim = animRefs.current.get(i);
-        if (!anim) {
-          // Already fully revealed, render as plain text
-          return <Text key={i} style={styles.messageContent}>{char}</Text>;
-        }
-        return (
-          <Animated.Text
-            key={i}
-            style={[
-              styles.messageContent,
-              {
-                opacity: anim,
-                transform: [
-                  { translateY: anim.interpolate({ inputRange: [0, 1], outputRange: [4, 0] }) },
-                ],
-              },
-            ]}
-          >
-            {char}
-          </Animated.Text>
-        );
-      })}
-    </View>
+    <Animated.Text style={[styles.messageContent, { opacity }]}>
+      {text}
+    </Animated.Text>
   );
 }
 
@@ -1278,6 +1258,15 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 100,
+  },
+  // Immersive mode tap-to-reveal overlay
+  immersiveOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    zIndex: 50,
   },
   overlayBackdrop: {
     ...StyleSheet.absoluteFillObject,
