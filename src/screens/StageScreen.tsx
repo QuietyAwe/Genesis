@@ -6,7 +6,6 @@ import {
   KeyboardAvoidingView,
   PanResponder,
   Platform,
-  Pressable,
   ScrollView,
   StyleSheet,
   Text,
@@ -25,16 +24,19 @@ import { exportToMarkdown, copyToClipboard } from '../services/export/markdown';
 import * as stageDao from '../services/db/stageDao';
 import { lightImpact, mediumImpact, selection } from '../utils/haptics';
 
+const HEADER_HEIGHT = 80;
+const FOOTER_HEIGHT = 12;
+
 export default function StageScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const navigation = useNavigation();
-  const messages = useStageStore((s) => s.messages);
+  const allMessages = useStageStore((s) => s.allMessages);
+  const activeBranchId = useStageStore((s) => s.activeBranchId);
   const characters = useStageStore((s) => s.characters);
   const stage = useStageStore((s) => s.stage);
   const isStreaming = useStageStore((s) => s.isStreaming);
   const streamingContent = useStageStore((s) => s.streamingContent);
   const currentSpeaker = useStageStore((s) => s.currentSpeaker);
-  const activeBranchId = useStageStore((s) => s.activeBranchId);
   const apiError = useStageStore((s) => s.apiError);
   const clearApiError = useStageStore((s) => s.clearApiError);
   const stageSummary = useStageStore((s) => s.stageSummary);
@@ -47,8 +49,15 @@ export default function StageScreen() {
   const regenerateMessage = useStageStore((s) => s.regenerateMessage);
   const deleteBranch = useStageStore((s) => s.deleteBranch);
   const switchBranch = useStageStore((s) => s.switchBranch);
+  const prepareSwitchBranch = useStageStore((s) => s.prepareSwitchBranch);
+  const clearPendingSwitch = useStageStore((s) => s.clearPendingSwitch);
   const getBranches = useStageStore((s) => s.getBranches);
-  const archiveCharacters = useArchiveStore((s) => s.characters);
+  const pendingSwitch = useStageStore((s) => s.pendingSwitch);
+  const forkIndex = useStageStore((s) => s.forkIndex);
+
+  const displayedMessages = activeBranchId
+    ? allMessages.filter((m) => m.branchId === activeBranchId)
+    : allMessages;
 
   const [inputText, setInputText] = useState('');
   const [identityMode, setIdentityMode] = useState<'narrator' | 'character' | 'guest'>('narrator');
@@ -57,56 +66,6 @@ export default function StageScreen() {
   const [showStageList, setShowStageList] = useState(false);
   const [allStages, setAllStages] = useState<Stage[]>([]);
   const flatListRef = useRef<FlatList>(null);
-
-  // Immersive mode: hide header/input on scroll down, show on tap/scroll-to-top
-  const headerAnim = useRef(new Animated.Value(0)).current; // 0 = visible, 1 = hidden
-  const inputAnim = useRef(new Animated.Value(0)).current;
-  const lastScrollY = useRef(0);
-  const immersiveRef = useRef(false);
-  const [isImmersive, setIsImmersive] = useState(false);
-
-  const HIDE_THRESHOLD = 60; // px of scroll before triggering hide
-
-  const animateUI = useCallback((visible: boolean) => {
-    const toValue = visible ? 0 : 1;
-    immersiveRef.current = !visible;
-    setIsImmersive(!visible);
-    Animated.parallel([
-      Animated.timing(headerAnim, { toValue, duration: 250, useNativeDriver: true }),
-      Animated.timing(inputAnim, { toValue, duration: 250, useNativeDriver: true }),
-    ]).start();
-  }, [headerAnim, inputAnim]);
-
-  const handleScroll = useCallback((event: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const currentY = contentOffset.y;
-    const dy = currentY - lastScrollY.current;
-    // Check if user is near the bottom (within 100px) — if so, they're watching live, don't hide UI
-    const isNearBottom = currentY + layoutMeasurement.height >= contentSize.height - 100;
-
-    if (dy > HIDE_THRESHOLD && !immersiveRef.current && !isNearBottom) {
-      // Only hide when user scrolls UP through history (away from bottom)
-      animateUI(false);
-    } else if (dy < -HIDE_THRESHOLD && immersiveRef.current) {
-      // Always show when scrolling back down
-      animateUI(true);
-    }
-    lastScrollY.current = currentY;
-  }, [animateUI]);
-
-  // Reset immersive when scrolling to top
-  const handleScrollToTop = useCallback((event: any) => {
-    const y = event.nativeEvent.contentOffset.y;
-    if (y < 20 && immersiveRef.current) {
-      animateUI(true);
-    }
-  }, [animateUI]);
-
-  const handleTapToReveal = useCallback(() => {
-    if (immersiveRef.current) {
-      animateUI(true);
-    }
-  }, [animateUI]);
 
   const openStageSwitcher = async () => {
     const stages = await stageDao.getAllStages();
@@ -119,7 +78,6 @@ export default function StageScreen() {
     if (stageId === stage?.id) return;
     console.log(`[Stage] Switching to stage: ${stageId}`);
     await useStageStore.getState().selectStage(stageId);
-    // Reset identity and selected character
     setIdentityMode('narrator');
     setSelectedCharacter(null);
   };
@@ -138,17 +96,13 @@ export default function StageScreen() {
               console.log(`[Stage] Deleting stage: ${s.id} (${s.name})`);
               await stageDao.deleteStage(s.id);
               setShowStageList(false);
-
-              // Refresh the list
               const remaining = await stageDao.getAllStages();
               setAllStages(remaining);
-
-              // If deleted the current stage, reset
               if (stage?.id === s.id) {
                 if (remaining.length > 0) {
                   await useStageStore.getState().selectStage(remaining[0].id);
                 } else {
-                  useStageStore.setState({ stage: null, messages: [], characters: [] });
+                  useStageStore.setState({ stage: null, allMessages: [], characters: [] });
                 }
               }
             } catch (e) {
@@ -177,15 +131,16 @@ export default function StageScreen() {
           const ids = chars.map((c) => c.id);
           const currentStage = useStageStore.getState().stage;
           if (!currentStage) {
-            // Check DB for existing stages before creating new one
             const stageDao = await import('../services/db/stageDao');
             const existingStages = await stageDao.getAllStages();
             if (existingStages.length > 0) {
               console.log(`[Stage] Found ${existingStages.length} existing stage(s) in DB, loading first`);
               await useStageStore.getState().loadStage(existingStages[0].id);
+              console.log(`[Stage] loadStage complete, store chars: ${useStageStore.getState().characters.length}`);
             } else {
               console.log('[Stage] Creating new stage "第一幕"');
               await createStage('第一幕', ids);
+              console.log(`[Stage] createStage complete, store chars: ${useStageStore.getState().characters.length}`);
             }
           } else {
             console.log(`[Stage] Loading existing stage: ${currentStage.id}`);
@@ -199,11 +154,45 @@ export default function StageScreen() {
       }
     };
     ensureLoaded();
-  }, []);
+  }, [createStage, loadStage]);
 
   useEffect(() => {
     flatListRef.current?.scrollToEnd({ animated: true });
-  }, [messages, streamingContent]);
+  }, [displayedMessages, streamingContent]);
+
+  // Scroll-first branch switch: scroll to fork point, then switch branch
+  useEffect(() => {
+    if (!pendingSwitch) return;
+    const { targetBranchId, forkIndex: scrollIdx } = pendingSwitch;
+
+    // Delay to wait for any prior renders
+    const timer = setTimeout(() => {
+      if (scrollIdx > 0) {
+        try {
+          flatListRef.current?.scrollToIndex({ index: scrollIdx, animated: true, viewPosition: 0.3 });
+        } catch {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }
+      }
+      // Switch branch after scroll animation completes
+      const switchTimer = setTimeout(() => {
+        switchBranch(targetBranchId);
+      }, scrollIdx > 0 ? 500 : 0);
+
+      return () => clearTimeout(switchTimer);
+    }, 100);
+
+    return () => clearTimeout(timer);
+  }, [pendingSwitch, switchBranch, clearPendingSwitch]);
+
+  // Clear forkIndex after fade-in animation completes
+  useEffect(() => {
+    if (forkIndex < 0) return;
+    const timer = setTimeout(() => {
+      useStageStore.setState({ forkIndex: -1 });
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [forkIndex]);
 
   const handleSend = () => {
     if (!inputText.trim() || isStreaming) return;
@@ -245,44 +234,38 @@ export default function StageScreen() {
 
   const handleForceSpeaker = (char: Character) => {
     selection();
-    // Select the character for future sends
     setSelectedCharacter(char);
     setIdentityMode('character');
     if (inputText.trim() && !isStreaming) {
-      // If there's already text, send immediately as this character
       sendMessage(inputText.trim(), 'character', char.name, char.avatar, char.id);
       setInputText('');
     }
   };
 
   const handleAutoPlay = () => {
-    if (!isStreaming) {
-      mediumImpact();
-      triggerAutoReply();
+    if (isStreaming) {
+      console.log('[Stage::AutoPlay] Already streaming, ignoring');
+      return;
     }
+    console.log('[Stage::AutoPlay] Triggering auto-reply');
+    mediumImpact();
+    triggerAutoReply();
   };
 
-  // Filter messages by active branch
-  const displayedMessages = activeBranchId
-    ? messages.filter((m) => m.branchId === activeBranchId)
-    : messages;
-
-  // Branch switching
   const branches = getBranches();
-  const branchIndicator = branches.length > 1 && activeBranchId
-    ? (() => {
-        const idx = branches.findIndex((b) => b.branchId === activeBranchId);
-        return `${idx + 1}/${branches.length}`;
-      })()
-    : null;
 
   const handleBranchSwitch = (direction: 'left' | 'right') => {
     if (branches.length < 2) return;
     const activeIdx = branches.findIndex((b) => b.branchId === activeBranchId);
-    let newIdx = direction === 'left' ? activeIdx + 1 : activeIdx - 1;
+    let newIdx = direction === 'left' ? activeIdx - 1 : activeIdx + 1;
     if (newIdx < 0) newIdx = branches.length - 1;
     if (newIdx >= branches.length) newIdx = 0;
-    switchBranch(branches[newIdx].branchId);
+    prepareSwitchBranch(branches[newIdx].branchId);
+  };
+
+  const handleDotSwitch = (targetBranchId: string) => {
+    if (targetBranchId === activeBranchId) return;
+    prepareSwitchBranch(targetBranchId);
   };
 
   const handleExport = async () => {
@@ -304,7 +287,6 @@ export default function StageScreen() {
     if (ok) {
       Alert.alert('导出成功', 'Markdown 内容已复制到剪贴板');
     } else {
-      // Fallback: show in alert for manual copy
       Alert.alert('导出', '已生成 Markdown 文档（长按可复制）', [
         { text: '好的' },
       ]);
@@ -314,12 +296,12 @@ export default function StageScreen() {
 
   if (initializing) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.header}>
-          <Text style={styles.stageName}>舞台</Text>
+          <Text style={[styles.stageName, { color: colors.text.primary }]}>舞台</Text>
         </View>
         <View style={styles.emptyState}>
-          <Text style={styles.loadingText}>初始化舞台...</Text>
+          <Text style={[styles.loadingText, { color: colors.text.tertiary }]}>初始化舞台...</Text>
         </View>
       </View>
     );
@@ -327,24 +309,24 @@ export default function StageScreen() {
 
   if (!stage || characters.length === 0) {
     return (
-      <View style={styles.container}>
+      <View style={[styles.container, { backgroundColor: colors.background }]}>
         <View style={styles.header}>
-          <Text style={styles.stageName}>舞台</Text>
+          <Text style={[styles.stageName, { color: colors.text.primary }]}>舞台</Text>
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => (navigation as any).navigate('StageSetup')}>
-            <Text style={styles.headerIconText}>+</Text>
+            <Text style={[styles.headerIconText, { color: colors.text.primary }]}>+</Text>
           </TouchableOpacity>
         </View>
         <View style={styles.emptyState}>
           <Text style={styles.emptyIcon}>🎭</Text>
-          <Text style={styles.emptyText}>暂无舞台</Text>
-          <Text style={styles.emptyHint}>
-            {archiveCharacters.length > 0
+          <Text style={[styles.emptyText, { color: colors.text.primary }]}>暂无舞台</Text>
+          <Text style={[styles.emptyHint, { color: colors.text.tertiary }]}>
+            {useArchiveStore.getState().characters.length > 0
               ? '图鉴中已有角色，点击右上角 + 创建舞台开始推演。'
               : '请先在图鉴中创建角色，然后来这里开始推演。'}
           </Text>
-          {archiveCharacters.length === 0 && (
-            <TouchableOpacity style={styles.emptyBtn} onPress={() => (navigation as any).navigate('Archive')}>
-              <Text style={styles.emptyBtnText}>前往图鉴</Text>
+          {useArchiveStore.getState().characters.length === 0 && (
+            <TouchableOpacity style={[styles.emptyBtn, { backgroundColor: colors.text.primary }]} onPress={() => (navigation as any).navigate('Archive')}>
+              <Text style={[styles.emptyBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>前往图鉴</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -354,304 +336,222 @@ export default function StageScreen() {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
     >
-      <Animated.View
-        style={[
-          styles.header,
-          {
-            opacity: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-            transform: [
-              { translateY: headerAnim.interpolate({ inputRange: [0, 1], outputRange: [0, -60] }) },
-            ],
-            zIndex: 10,
-          },
-        ]}
-        pointerEvents={isImmersive ? 'none' : 'auto'}
-      >
+      {/* Header */}
+      <View style={styles.header}>
         <TouchableOpacity style={styles.stageNameBtn} onPress={openStageSwitcher} onLongPress={() => setDebugVisible(true)} delayLongPress={500}>
-          <Text style={styles.stageName}>{stage.name}</Text>
-          <Text style={styles.stageChevron}>▾</Text>
+          <Text style={[styles.stageName, { color: colors.text.primary }]}>{stage.name}</Text>
+          <Text style={[styles.stageChevron, { color: colors.text.tertiary }]}>▾</Text>
         </TouchableOpacity>
         <View style={styles.headerRight}>
           <TouchableOpacity style={styles.headerIconBtn} onPress={() => (navigation as any).navigate('StageSetup')}>
-            <Text style={styles.headerIconText}>+</Text>
+            <Text style={[styles.headerIconText, { color: colors.text.primary }]}>+</Text>
           </TouchableOpacity>
           <TouchableOpacity style={styles.headerIconBtn} onPress={handleExport}>
             <Text style={styles.headerIconText}>📋</Text>
           </TouchableOpacity>
           {isStreaming ? (
-            <Text style={styles.streamingIndicator}>生成中...</Text>
+            <Text style={[styles.streamingIndicator, { color: colors.text.tertiary }]}>生成中...</Text>
           ) : (
             <TouchableOpacity style={styles.autoPlayBtn} onPress={handleAutoPlay}>
-              <Text style={styles.autoPlayText}>▶ 自动推演</Text>
+              <Text style={[styles.autoPlayText, { color: colors.text.secondary }]}>▶ 自动推演</Text>
             </TouchableOpacity>
           )}
         </View>
-      </Animated.View>
+      </View>
 
-      {/* API error banner */}
-      {apiError && (
-        <View style={styles.errorBanner}>
-          <Text style={styles.errorBannerText}>{apiError}</Text>
-          <View style={styles.errorActions}>
-            <TouchableOpacity
-              onPress={() => { clearApiError(); triggerAutoReply(); }}
-              style={styles.errorRetryBtn}
-              disabled={isStreaming}
-            >
-              <Text style={styles.errorRetryText}>重试</Text>
-            </TouchableOpacity>
-            <TouchableOpacity onPress={clearApiError} style={styles.errorDismissBtn}>
-              <Text style={styles.errorDismissText}>✕</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      )}
-
-      {/* Stage summary banner — auto-generated when history is truncated */}
-      {stageSummary ? (
-        <View style={styles.summaryBanner}>
-          <Text style={styles.summaryIcon}>📖</Text>
-          <Text style={styles.summaryText}>{stageSummary}</Text>
-        </View>
-      ) : null}
-
+      {/* Message list */}
       <FlatList
         ref={flatListRef}
         data={displayedMessages}
         keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <SwipeableMessage
-            msg={item}
-            isStreaming={false}
-            onRegenerate={() => regenerateMessage(item.id)}
-            onDelete={() => deleteBranch(item.branchId, item.id)}
-            onSwitchBranch={() => handleBranchSwitch('left')}
-            hasMultipleBranches={branches.length > 1}
-            branchIndicator={branchIndicator}
-          />
-        )}
         contentContainerStyle={styles.listContent}
-        onScroll={handleScroll}
-        scrollEventThrottle={16}
-        onScrollToTop={handleScrollToTop}
-        ListFooterComponent={
-          streamingContent ? (
-            <MessageItem
-              senderType="character"
-              senderName={currentSpeaker || ''}
-              senderAvatar={characters.find((c) => c.name === currentSpeaker)?.avatar || '🎭'}
-              content={streamingContent}
-              isStreaming
+        ListHeaderComponent={<View style={{ height: HEADER_HEIGHT }} />}
+        renderItem={({ item, index }) => (
+          <>
+            {index === forkIndex && forkIndex > 0 && (
+              <View style={styles.branchDivider}>
+                <View style={[styles.branchDividerLine, { backgroundColor: colors.text.tertiary }]} />
+                <Text style={[styles.branchDividerText, { color: colors.text.tertiary }]}>从这里开始分叉</Text>
+                <View style={[styles.branchDividerLine, { backgroundColor: colors.text.tertiary }]} />
+              </View>
+            )}
+            <SwipeableMessage
+              msg={item}
+              isStreaming={false}
+              isNewForkMessage={forkIndex >= 0 && index >= forkIndex}
+              onRegenerate={() => regenerateMessage(item.id)}
+              onDelete={() => deleteBranch(item.branchId, item.id)}
+              colors={colors}
             />
-          ) : (
-            <View style={styles.bottomSpacer} />
-          )
+          </>
+        )}
+        ListFooterComponent={
+          <>
+            {streamingContent ? (
+              <MessageItem
+                senderType="character"
+                senderName={currentSpeaker || ''}
+                senderAvatar={characters.find((c) => c.name === currentSpeaker)?.avatar || '🎭'}
+                content={streamingContent}
+                isStreaming
+                colors={colors}
+              />
+            ) : (
+              <View style={styles.bottomSpacer} />
+            )}
+            <View style={{ height: FOOTER_HEIGHT }} />
+          </>
         }
-        onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
       />
 
-      {/* Speaker quick-pick avatars */}
-      <Animated.View
-        style={[
-          styles.speakerBar,
-          {
-            opacity: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-            transform: [
-              { translateY: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 60] }) },
-            ],
-          },
-        ]}
-        pointerEvents={isImmersive ? 'none' : 'auto'}
-      >
-        {characters.map((c) => {
-          const isSelected = selectedCharacter?.id === c.id;
-          const isImage = (c.avatar || '').startsWith('file://') || (c.avatar || '').startsWith('data:') || (c.avatar || '').startsWith('http');
-          return (
-            <TouchableOpacity
-              key={c.id}
-              style={[styles.speakerAvatar, isSelected && styles.speakerAvatarSelected]}
-              onPress={() => handleForceSpeaker(c)}
-              disabled={isStreaming}
-            >
-              {isImage ? (
-                <Image source={{ uri: c.avatar }} style={styles.speakerAvatarImage} />
-              ) : (
-                <Text style={styles.speakerEmoji}>{c.avatar}</Text>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-      </Animated.View>
+      {/* Footer */}
+      <View style={[styles.footer, { backgroundColor: colors.background }]}>
+        <View style={[styles.speakerBar, { borderTopColor: colors.separator }]}>
+          {characters.map((c) => {
+            const isSelected = selectedCharacter?.id === c.id;
+            const isImage = (c.avatar || '').startsWith('file://') || (c.avatar || '').startsWith('data:') || (c.avatar || '').startsWith('http');
+            return (
+              <TouchableOpacity
+                key={c.id}
+                style={[styles.speakerAvatar, { backgroundColor: colors.surface }, isSelected && { borderWidth: 2, borderColor: colors.text.primary, backgroundColor: colors.text.primary }]}
+                onPress={() => handleForceSpeaker(c)}
+                disabled={isStreaming}
+              >
+                {isImage ? (
+                  <Image source={{ uri: c.avatar }} style={styles.speakerAvatarImage} />
+                ) : (
+                  <Text style={styles.speakerEmoji}>{c.avatar}</Text>
+                )}
+              </TouchableOpacity>
+            );
+          })}
+        </View>
 
-      {/* Identity switcher + input */}
-      <Animated.View
-        style={[
-          styles.inputArea,
-          {
-            opacity: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-            transform: [
-              { translateY: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 60] }) },
-            ],
-          },
-        ]}
-        pointerEvents={isImmersive ? 'none' : 'auto'}
-      >
-        <TouchableOpacity
-          style={styles.identityBtn}
-          onPress={() => {
-            selection();
-            const modes = ['narrator', 'character', 'guest'] as const;
-            const idx = modes.indexOf(identityMode);
-            setIdentityMode(modes[(idx + 1) % modes.length]);
-          }}
-        >
-          {identityMode === 'narrator' ? (
-            <Text style={styles.identityText}>📜</Text>
-          ) : identityMode === 'character' ? (
-            selectedCharacter ? (
-              (selectedCharacter.avatar || '').startsWith('file://') || (selectedCharacter.avatar || '').startsWith('data:') || (selectedCharacter.avatar || '').startsWith('http') ? (
-                <Image source={{ uri: selectedCharacter.avatar }} style={styles.identityAvatar} />
+        <View style={[styles.inputArea, { backgroundColor: colors.background, borderTopColor: colors.separator }]}>
+          <TouchableOpacity
+            style={[styles.identityBtn, { backgroundColor: colors.surface }]}
+            onPress={() => {
+              selection();
+              const modes = ['narrator', 'character', 'guest'] as const;
+              const idx = modes.indexOf(identityMode);
+              setIdentityMode(modes[(idx + 1) % modes.length]);
+            }}
+          >
+            {identityMode === 'narrator' ? (
+              <Text style={styles.identityText}>📜</Text>
+            ) : identityMode === 'character' ? (
+              selectedCharacter ? (
+                (selectedCharacter.avatar || '').startsWith('file://') || (selectedCharacter.avatar || '').startsWith('data:') || (selectedCharacter.avatar || '').startsWith('http') ? (
+                  <Image source={{ uri: selectedCharacter.avatar }} style={styles.identityAvatar} />
+                ) : (
+                  <Text style={styles.identityText}>{selectedCharacter.avatar}</Text>
+                )
               ) : (
-                <Text style={styles.identityText}>{selectedCharacter.avatar}</Text>
+                <Text style={styles.identityText}>🎭</Text>
               )
             ) : (
-              <Text style={styles.identityText}>🎭</Text>
-            )
-          ) : (
-            <Text style={styles.identityText}>👤</Text>
-          )}
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          value={inputText}
-          onChangeText={setInputText}
-          placeholder={
-            identityMode === 'narrator'
-              ? '旁白：描述场景或事件...'
-              : identityMode === 'character' && selectedCharacter
-              ? `${selectedCharacter.name}：输入台词...`
-              : '神秘人：发言...'
-          }
-          placeholderTextColor={colors.text.tertiary}
-          multiline
-          maxLength={2000}
-        />
-        <TouchableOpacity
-          style={[styles.sendBtn, (!inputText.trim() || isStreaming) && styles.sendBtnDisabled]}
-          onPress={handleSend}
-          disabled={!inputText.trim() || isStreaming}
-        >
-          <Text style={styles.sendText}>›</Text>
-        </TouchableOpacity>
-      </Animated.View>
-
-      {/* Worldline branch indicator */}
-      {branches.length > 0 && (
-        <Animated.View
-          style={[
-            styles.branchBar,
-            {
-              opacity: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [1, 0] }),
-              transform: [
-                { translateY: inputAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 40] }) },
-              ],
-            },
-          ]}
-          pointerEvents={isImmersive ? 'none' : 'auto'}
-          onStartShouldSetResponder={() => true}
-        >
-          <TouchableOpacity
-            style={styles.branchNavBtn}
-            onPress={() => handleBranchSwitch('left')}
-          >
-            <Text style={styles.branchNavText}>‹</Text>
+              <Text style={styles.identityText}>👤</Text>
+            )}
           </TouchableOpacity>
-          <View style={styles.branchDots}>
-            {branches.map((b) => (
-              <TouchableOpacity
-                key={b.branchId}
-                style={styles.branchDot}
-                onPress={() => switchBranch(b.branchId)}
-              >
-                <View
-                  style={[
-                    styles.branchDotInner,
-                    b.branchId === activeBranchId && styles.branchDotActive,
-                  ]}
-                />
-              </TouchableOpacity>
-            ))}
+          <TextInput
+            style={[styles.input, { color: colors.text.primary }]}
+            value={inputText}
+            onChangeText={setInputText}
+            placeholder={
+              identityMode === 'narrator'
+                ? '旁白：描述场景或事件...'
+                : identityMode === 'character' && selectedCharacter
+                ? `${selectedCharacter.name}：输入台词...`
+                : '神秘人：发言...'
+            }
+            placeholderTextColor={colors.text.tertiary}
+            multiline
+            maxLength={2000}
+          />
+          <TouchableOpacity
+            style={[styles.sendBtn, { backgroundColor: inputText.trim() && !isStreaming ? colors.text.primary : colors.separator }, (!inputText.trim() || isStreaming) && styles.sendBtnDisabled]}
+            onPress={handleSend}
+            disabled={!inputText.trim() || isStreaming}
+          >
+            <Text style={[styles.sendText, { color: isDark ? '#000000' : '#FFFFFF' }]}>›</Text>
+          </TouchableOpacity>
+        </View>
+
+        {branches.length > 0 && (
+          <View style={[styles.branchBar, { backgroundColor: colors.background, borderTopColor: colors.separator }]}>
+            <TouchableOpacity style={styles.branchNavBtn} onPress={() => handleBranchSwitch('left')}>
+              <Text style={[styles.branchNavText, { color: colors.text.secondary }]}>‹</Text>
+            </TouchableOpacity>
+            <View style={styles.branchDots}>
+              {branches.map((b) => (
+                <TouchableOpacity key={b.branchId} style={styles.branchDot} onPress={() => handleDotSwitch(b.branchId)}>
+                  <View style={[styles.branchDotInner, { backgroundColor: colors.text.tertiary }, b.branchId === activeBranchId && { backgroundColor: colors.text.primary, width: 10, height: 10, borderRadius: 5 }]} />
+                </TouchableOpacity>
+              ))}
+            </View>
+            <TouchableOpacity style={styles.branchNavBtn} onPress={() => handleBranchSwitch('right')}>
+              <Text style={[styles.branchNavText, { color: colors.text.secondary }]}>›</Text>
+            </TouchableOpacity>
           </View>
-          <TouchableOpacity
-            style={styles.branchNavBtn}
-            onPress={() => handleBranchSwitch('right')}
-          >
-            <Text style={styles.branchNavText}>›</Text>
-          </TouchableOpacity>
-        </Animated.View>
-      )}
-
-      {/* Tap-to-reveal overlay — only visible in immersive mode */}
-      {isImmersive && (
-        <Pressable style={styles.immersiveOverlay} onPress={handleTapToReveal} />
-      )}
+        )}
+      </View>
 
       {/* Stage switcher overlay */}
       {showStageList && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={() => setShowStageList(false)} activeOpacity={1} />
-          <View style={styles.stageList}>
-            <Text style={styles.stageListTitle}>切换舞台</Text>
+          <View style={[styles.stageList, { backgroundColor: isDark ? '#1A1A1A' : '#FFFFFF' }]}>
+            <Text style={[styles.stageListTitle, { color: colors.text.tertiary, borderBottomColor: colors.separator }]}>切换舞台</Text>
             {allStages.map((s) => (
               <TouchableOpacity
                 key={s.id}
-                style={[styles.stageListItem, s.id === stage?.id && styles.stageListItemActive]}
+                style={[styles.stageListItem, s.id === stage?.id && { backgroundColor: isDark ? '#2A2A2A' : '#F5F5F5' }]}
                 onPress={() => handleStageSelect(s.id)}
                 onLongPress={() => handleDeleteStage(s)}
                 delayLongPress={500}
               >
-                <Text style={[styles.stageListItemText, s.id === stage?.id && styles.stageListItemTextActive]}>
+                <Text style={[styles.stageListItemText, { color: colors.text.primary }, s.id === stage?.id && { fontWeight: '600' }]}>
                   {s.name}
                 </Text>
                 {s.id === stage?.id ? (
-                  <Text style={styles.stageListCheck}>✓</Text>
+                  <Text style={[styles.stageListCheck, { color: colors.text.primary }]}>✓</Text>
                 ) : (
-                  <Text style={styles.stageListDeleteHint}>长按删除</Text>
+                  <Text style={[styles.stageListDeleteHint, { color: colors.text.tertiary }]}>长按删除</Text>
                 )}
               </TouchableOpacity>
             ))}
             <TouchableOpacity
-              style={styles.stageListNewBtn}
+              style={[styles.stageListNewBtn, { borderColor: colors.text.primary }]}
               onPress={() => {
                 setShowStageList(false);
                 (navigation as any).navigate('StageSetup');
               }}
             >
-              <Text style={styles.stageListNewText}>+ 新建舞台</Text>
+              <Text style={[styles.stageListNewText, { color: colors.text.primary }]}>+ 新建舞台</Text>
             </TouchableOpacity>
           </View>
         </View>
       )}
 
-      {/* Debug prompt inspector — long-press stage name to open */}
+      {/* Debug prompt inspector */}
       {debugVisible && lastPrompt && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={() => setDebugVisible(false)} activeOpacity={1} />
-          <View style={styles.debugPanel}>
-            <Text style={styles.debugPanelTitle}>🔍 提示词调试</Text>
-            <Text style={styles.debugPanelSubtitle}>System Prompt</Text>
+          <View style={[styles.debugPanel, { backgroundColor: isDark ? '#1A1A1A' : '#FFFFFF' }]}>
+            <Text style={[styles.debugPanelTitle, { color: colors.text.primary }]}>🔍 提示词调试</Text>
+            <Text style={[styles.debugPanelSubtitle, { color: colors.text.tertiary }]}>System Prompt</Text>
             <ScrollView style={styles.debugScroll} showsVerticalScrollIndicator>
-              <Text style={styles.debugText}>{lastPrompt.system}</Text>
-              <Text style={styles.debugPanelSubtitle}>API Messages</Text>
-              <Text style={styles.debugText}>{lastPrompt.messages}</Text>
+              <Text style={[styles.debugText, { color: colors.text.primary }]}>{lastPrompt.system}</Text>
+              <Text style={[styles.debugPanelSubtitle, { color: colors.text.tertiary }]}>API Messages</Text>
+              <Text style={[styles.debugText, { color: colors.text.primary }]}>{lastPrompt.messages}</Text>
               <View style={styles.debugBottomPadding} />
             </ScrollView>
-            <TouchableOpacity style={styles.debugCloseBtn} onPress={() => setDebugVisible(false)}>
-              <Text style={styles.debugCloseText}>关闭</Text>
+            <TouchableOpacity style={[styles.debugCloseBtn, { backgroundColor: colors.text.primary }]} onPress={() => setDebugVisible(false)}>
+              <Text style={[styles.debugCloseText, { color: isDark ? '#000000' : '#FFFFFF' }]}>关闭</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -659,11 +559,11 @@ export default function StageScreen() {
       {debugVisible && !lastPrompt && (
         <View style={styles.overlay}>
           <TouchableOpacity style={styles.overlayBackdrop} onPress={() => setDebugVisible(false)} activeOpacity={1} />
-          <View style={styles.debugPanel}>
-            <Text style={styles.debugPanelTitle}>🔍 提示词调试</Text>
-            <Text style={styles.debugEmptyText}>暂无历史 — 请先触发一次角色发言</Text>
-            <TouchableOpacity style={styles.debugCloseBtn} onPress={() => setDebugVisible(false)}>
-              <Text style={styles.debugCloseText}>关闭</Text>
+          <View style={[styles.debugPanel, { backgroundColor: isDark ? '#1A1A1A' : '#FFFFFF' }]}>
+            <Text style={[styles.debugPanelTitle, { color: colors.text.primary }]}>🔍 提示词调试</Text>
+            <Text style={[styles.debugEmptyText, { color: colors.text.tertiary }]}>暂无历史 — 请先触发一次角色发言</Text>
+            <TouchableOpacity style={[styles.debugCloseBtn, { backgroundColor: colors.text.primary }]} onPress={() => setDebugVisible(false)}>
+              <Text style={[styles.debugCloseText, { color: isDark ? '#000000' : '#FFFFFF' }]}>关闭</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -675,25 +575,33 @@ export default function StageScreen() {
 function SwipeableMessage({
   msg,
   isStreaming,
+  isNewForkMessage,
   onRegenerate,
   onDelete,
-  onSwitchBranch,
-  hasMultipleBranches,
-  branchIndicator,
+  colors,
 }: {
   msg: ChatMessage;
   isStreaming: boolean;
+  isNewForkMessage?: boolean;
   onRegenerate: () => void;
   onDelete: () => void;
-  onSwitchBranch: () => void;
-  hasMultipleBranches: boolean;
-  branchIndicator: string | null;
+  colors: typeof import('../constants/theme').colors;
 }) {
+  const { isDark } = useTheme();
   const panX = useRef(new Animated.Value(0)).current;
   const isRegenerating = useRef(false);
   const currentX = useRef(0);
   const startX = useRef(0);
   const sidebarW = 140;
+
+  // Fade-in animation for new fork messages
+  const fadeAnim = useRef(new Animated.Value(isNewForkMessage ? 0 : 1)).current;
+  useEffect(() => {
+    if (isNewForkMessage) {
+      fadeAnim.setValue(0);
+      Animated.timing(fadeAnim, { toValue: 1, duration: 350, useNativeDriver: true }).start();
+    }
+  }, [isNewForkMessage, fadeAnim]);
 
   const snapTo = useCallback((toValue: number) => {
     currentX.current = toValue;
@@ -722,65 +630,37 @@ function SwipeableMessage({
     closeSwipe();
   }, [onDelete, closeSwipe]);
 
-  const handleSwitch = useCallback(() => {
-    selection();
-    onSwitchBranch();
-    closeSwipe();
-  }, [onSwitchBranch, closeSwipe]);
-
   const panHandlers = useRef(
     PanResponder.create({
-      // Always return false — never compete with FlatList on touch start.
-      // Only claim the gesture during move phase after direction is clear.
       onStartShouldSetPanResponder: () => false,
-      onMoveShouldSetPanResponder: (_, gestureState) => {
-        // Require substantial horizontal movement AND a clear horizontal-dominant ratio.
-        // This prevents any vertical scroll (even with slight horizontal jitter) from
-        // being intercepted. Thresholds tuned to be noticeably higher than normal scroll drift.
+      onMoveShouldSetPanResponder: (_ev: any, gestureState: any) => {
         const minDx = 25;
-        const ratio = 3; // horizontal must exceed vertical × 3
+        const ratio = 3;
         if (currentX.current === 0) {
-          // Sidebar closed: only allow leftward swipe
-          return (
-            gestureState.dx < -minDx &&
-            Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * ratio
-          );
+          return gestureState.dx < -minDx && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * ratio;
         }
-        // Sidebar open: allow both directions to close / interact with buttons
-        return (
-          Math.abs(gestureState.dx) > minDx &&
-          Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * ratio
-        );
+        return Math.abs(gestureState.dx) > minDx && Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * ratio;
       },
-      onPanResponderGrant: () => {
-        startX.current = currentX.current;
-      },
-      onPanResponderMove: (_, gestureState) => {
-        const newValue = startX.current + gestureState.dx;
-        const clamped = Math.min(Math.max(newValue, -sidebarW), 0);
+      onPanResponderGrant: () => { startX.current = currentX.current; },
+      onPanResponderMove: (_ev: any, gestureState: any) => {
+        const clamped = Math.min(Math.max(startX.current + gestureState.dx, -sidebarW), 0);
         currentX.current = clamped;
         panX.setValue(clamped);
       },
       onPanResponderRelease: () => {
-        if (currentX.current < -sidebarW / 2) {
-          snapTo(-sidebarW);
-        } else {
-          snapTo(0);
-        }
+        snapTo(currentX.current < -sidebarW / 2 ? -sidebarW : 0);
       },
     }),
   ).current;
 
   useEffect(() => {
-    const id = panX.addListener(({ value }) => {
-      currentX.current = value;
-    });
+    const id = panX.addListener(({ value }) => { currentX.current = value; });
     return () => panX.removeListener(id);
   }, [panX]);
 
   const messageContent = msg.senderType === 'narrator' ? (
     <View style={styles.narratorBlock}>
-      <Text style={styles.narratorText}>{msg.content}</Text>
+      <Text style={[styles.narratorText, { color: colors.text.narrator }]}>{msg.content}</Text>
     </View>
   ) : (
     <MessageItem
@@ -789,36 +669,29 @@ function SwipeableMessage({
       senderAvatar={msg.senderAvatar}
       content={msg.content}
       isStreaming={isStreaming}
+      colors={colors}
     />
   );
 
   return (
-    <View style={styles.swipeContainer}>
-      {/* Sidebar — fixed on the right, visible when content slides left */}
-      <View style={[styles.sidebar, { right: 0, width: sidebarW }]}>
-        {hasMultipleBranches && (
-          <TouchableOpacity style={styles.sidebarBtn} onPress={handleSwitch}>
-            <Text style={styles.sidebarIcon}>⇄</Text>
-            <Text style={styles.sidebarBtnText}>{branchIndicator || '切换'}</Text>
-          </TouchableOpacity>
-        )}
+    <Animated.View style={[styles.swipeContainer, { opacity: fadeAnim }]}>
+      <View style={[styles.sidebar, { right: 0, width: sidebarW, backgroundColor: isDark ? '#1A0A0A' : '#FFF3F3' }]}>
         <TouchableOpacity style={styles.sidebarBtn} onPress={triggerRegenerate}>
-          <Text style={styles.sidebarIcon}>↻</Text>
-          <Text style={styles.sidebarBtnText}>重新生成</Text>
+          <Text style={[styles.sidebarIcon, { color: isDark ? '#EF4444' : '#CC4444' }]}>↻</Text>
+          <Text style={[styles.sidebarBtnText, { color: isDark ? '#EF4444' : '#CC4444' }]}>重新生成</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.sidebarBtn} onPress={handleDelete}>
-          <Text style={[styles.sidebarIcon, styles.sidebarDeleteIcon]}>🗑</Text>
-          <Text style={[styles.sidebarBtnText, styles.sidebarDeleteText]}>删除</Text>
+          <Text style={[styles.sidebarIcon, styles.sidebarDeleteIcon, { color: isDark ? '#EF4444' : '#CC4444' }]}>🗑</Text>
+          <Text style={[styles.sidebarBtnText, styles.sidebarDeleteText, { color: isDark ? '#F87171' : '#AA3333' }]}>删除</Text>
         </TouchableOpacity>
       </View>
-      {/* Content — slides left to reveal sidebar */}
       <Animated.View
-        style={[styles.swipeContent, { transform: [{ translateX: panX }] }]}
+        style={[styles.swipeContent, { backgroundColor: colors.background }, { transform: [{ translateX: panX }] }]}
         {...panHandlers.panHandlers}
       >
         {messageContent}
       </Animated.View>
-    </View>
+    </Animated.View>
   );
 }
 
@@ -828,17 +701,19 @@ function MessageItem({
   senderAvatar,
   content,
   isStreaming,
+  colors,
 }: {
   senderType: string;
   senderName: string;
   senderAvatar: string;
   content: string;
   isStreaming?: boolean;
+  colors?: typeof import('../constants/theme').colors;
 }) {
   if (senderType === 'narrator') {
     return (
       <View style={styles.narratorBlock}>
-        <Text style={styles.narratorText}>{content}</Text>
+        <Text style={[styles.narratorText, colors && { color: colors.text.narrator }]}>{content}</Text>
       </View>
     );
   }
@@ -853,29 +728,24 @@ function MessageItem({
         ) : (
           <Text style={styles.messageAvatar}>{senderAvatar}</Text>
         )}
-        <Text style={styles.messageName}>{senderName}</Text>
-        {isStreaming && <Text style={styles.streamingDot}>●</Text>}
+        <Text style={[styles.messageName, colors && { color: colors.text.primary }]}>{senderName}</Text>
+        {isStreaming && <Text style={[styles.streamingDot, colors && { color: colors.text.primary }]}>●</Text>}
       </View>
       {isStreaming ? (
-        <StreamingText text={content} />
+        <StreamingText text={content} colors={colors} />
       ) : (
-        <Text style={styles.messageContent}>{content}</Text>
+        <Text style={[styles.messageContent, colors && { color: colors.text.primary }]}>{content}</Text>
       )}
     </View>
   );
 }
 
-/**
- * Renders streaming text with a subtle "live" feel — text pulses slightly
- * as new content arrives, with a blinking cursor dot.
- */
-function StreamingText({ text }: { text: string }) {
+function StreamingText({ text, colors: themeColors }: { text: string; colors?: typeof import('../constants/theme').colors }) {
   const opacity = useRef(new Animated.Value(1)).current;
   const prevLength = useRef(0);
 
   useEffect(() => {
     if (text.length > prevLength.current && text.length > 0) {
-      // Subtle pulse on new content arrival
       prevLength.current = text.length;
       Animated.sequence([
         Animated.timing(opacity, { toValue: 0.7, duration: 60, useNativeDriver: true }),
@@ -885,7 +755,7 @@ function StreamingText({ text }: { text: string }) {
   }, [text, opacity]);
 
   return (
-    <Animated.Text style={[styles.messageContent, { opacity }]}>
+    <Animated.Text style={[styles.messageContent, themeColors && { color: themeColors.text.primary }, { opacity }]}>
       {text}
     </Animated.Text>
   );
@@ -942,66 +812,7 @@ const styles = StyleSheet.create({
     color: colors.text.secondary,
     fontWeight: '500',
   },
-  // API error banner
-  errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#FFF3F3',
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.sm,
-  },
-  // Stage summary banner
-  summaryBanner: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    backgroundColor: colors.surface,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    gap: spacing.xs,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.separator,
-  },
-  summaryIcon: {
-    fontSize: 14,
-    marginTop: 2,
-  },
-  summaryText: {
-    flex: 1,
-    ...typography.caption,
-    color: colors.text.secondary,
-    lineHeight: 18,
-    fontStyle: 'italic',
-  },
-  errorBannerText: {
-    flex: 1,
-    ...typography.caption,
-    color: '#CC4444',
-    lineHeight: 18,
-  },
-  errorActions: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: spacing.xs,
-  },
-  errorRetryBtn: {
-    paddingVertical: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    backgroundColor: '#CC4444',
-    borderRadius: 6,
-  },
-  errorRetryText: {
-    ...typography.caption,
-    color: '#FFFFFF',
-    fontWeight: '600',
-  },
-  errorDismissBtn: {
-    padding: spacing.xs,
-  },
-  errorDismissText: {
-    fontSize: 14,
-    color: '#CC4444',
-  },
+  footer: {},
   listContent: {
     paddingHorizontal: spacing.lg,
   },
@@ -1070,11 +881,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  speakerAvatarSelected: {
-    borderWidth: 2,
-    borderColor: colors.text.primary,
-    backgroundColor: colors.text.primary,
-  },
+  speakerAvatarSelected: {},
   speakerEmoji: {
     fontSize: 18,
   },
@@ -1167,7 +974,6 @@ const styles = StyleSheet.create({
     ...typography.body,
     color: '#FFFFFF',
   },
-  // Swipe / regenerate
   swipeContainer: {
     marginBottom: spacing.lg,
     overflow: 'hidden',
@@ -1211,7 +1017,22 @@ const styles = StyleSheet.create({
   sidebarDeleteText: {
     color: '#AA3333',
   },
-  // Branch indicator
+  branchDivider: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginVertical: spacing.md,
+    gap: spacing.sm,
+  },
+  branchDividerLine: {
+    flex: 1,
+    height: 1,
+    backgroundColor: colors.text.tertiary,
+    opacity: 0.3,
+  },
+  branchDividerText: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+  },
   branchBar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -1250,7 +1071,6 @@ const styles = StyleSheet.create({
     height: 10,
     borderRadius: 5,
   },
-  // Stage switcher overlay
   overlay: {
     position: 'absolute',
     top: 0,
@@ -1258,15 +1078,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     zIndex: 100,
-  },
-  // Immersive mode tap-to-reveal overlay
-  immersiveOverlay: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
-    zIndex: 50,
   },
   overlayBackdrop: {
     ...StyleSheet.absoluteFillObject,
@@ -1336,7 +1147,6 @@ const styles = StyleSheet.create({
     color: colors.text.primary,
     fontWeight: '500',
   },
-  // Debug prompt inspector
   debugPanel: {
     position: 'absolute',
     bottom: spacing.lg,

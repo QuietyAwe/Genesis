@@ -1,5 +1,5 @@
 import React, { useCallback, useState } from 'react';
-import { ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
+import { Alert, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation, useFocusEffect } from '@react-navigation/native';
 import { useTheme } from '../hooks/useTheme';
 import { spacing, typography } from '../constants/theme';
@@ -74,6 +74,21 @@ export default function ChroniclesScreen() {
     (navigation as any).navigate('Tabs', { screen: 'Stage' });
   };
 
+  const handleDeleteStage = (stageId: string, stageName: string) => {
+    Alert.alert('删除剧本', `确定删除「${stageName}」吗？此操作将同时删除所有对话记录，且无法恢复。`, [
+      { text: '取消', style: 'cancel' },
+      {
+        text: '删除',
+        style: 'destructive',
+        onPress: async () => {
+          console.log(`[Chronicles] Deleting stage: ${stageName} (${stageId})`);
+          await stageDao.deleteStage(stageId);
+          loadChronicles().then(setEntries);
+        },
+      },
+    ]);
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
       <Text style={[styles.heading, { color: colors.text.primary }]}>历史</Text>
@@ -90,6 +105,8 @@ export default function ChroniclesScreen() {
               key={entry.id}
               style={[styles.card, { backgroundColor: colors.surface }]}
               onPress={() => handleOpenStage(entry.id)}
+              onLongPress={() => handleDeleteStage(entry.id, entry.name)}
+              activeOpacity={0.7}
             >
               <View style={styles.cardHeader}>
                 <Text style={[styles.cardTitle, { color: colors.text.primary }]}>{entry.name}</Text>

@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React from 'react';
 import { Image, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { useArchiveStore } from '../stores/useArchiveStore';
@@ -6,11 +6,10 @@ import { useTheme } from '../hooks/useTheme';
 import { spacing, typography } from '../constants/theme';
 
 export default function ArchiveScreen() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const navigation = useNavigation();
   const characters = useArchiveStore((s) => s.characters);
   const worlds = useArchiveStore((s) => s.worlds);
-  const load = useArchiveStore((s) => s.load);
 
   return (
     <View style={[styles.container, { backgroundColor: colors.background }]}>
@@ -27,7 +26,7 @@ export default function ArchiveScreen() {
             style={[styles.addBtn, styles.addBtnPrimary, { backgroundColor: colors.text.primary, borderColor: colors.text.primary }]}
             onPress={() => (navigation as any).navigate('CreateCharacter')}
           >
-            <Text style={styles.addBtnPrimaryText}>+ 角色</Text>
+            <Text style={[styles.addBtnPrimaryText, { color: isDark ? '#000000' : '#FFFFFF' }]}>+ 角色</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -40,7 +39,9 @@ export default function ArchiveScreen() {
         {characters.map((c) => (
           <TouchableOpacity
             key={c.id}
-            style={[styles.card, { backgroundColor: c.ambientColor || colors.surface }]}
+            style={[styles.card, isDark
+              ? { backgroundColor: colors.surface, borderLeftColor: c.ambientColor || colors.separator }
+              : { backgroundColor: c.ambientColor || colors.surface, borderLeftWidth: 0 }]}
             onPress={() =>
               (navigation as any).navigate('CharacterDetail', { characterId: c.id })
             }
@@ -68,7 +69,9 @@ export default function ArchiveScreen() {
         {worlds.map((w) => (
           <TouchableOpacity
             key={w.id}
-            style={[styles.card, { backgroundColor: w.ambientColor || colors.surface }]}
+            style={[styles.card, isDark
+              ? { backgroundColor: colors.surface, borderLeftColor: w.ambientColor || colors.separator }
+              : { backgroundColor: w.ambientColor || colors.surface, borderLeftWidth: 0 }]}
             onPress={() =>
               (navigation as any).navigate('WorldDetail', { worldId: w.id })
             }
@@ -141,6 +144,7 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     padding: spacing.lg,
     marginBottom: spacing.md,
+    borderLeftWidth: 4,
   },
   cardHeader: {
     flexDirection: 'row',

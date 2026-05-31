@@ -11,22 +11,24 @@ import {
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types';
+import { RootStackParamList, LoreEntry } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
+import { LoreEntryCard } from '../components/LoreEntryCard';
 import { deriveColorFromName, AMBIENT_SWATCHES } from '../utils/ambientColor';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateWorld'>;
 
 export default function CreateWorldScreen({ navigation }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [name, setName] = useState('');
   const [emoji, setEmoji] = useState('');
   const [lore, setLore] = useState('');
   const [ambientColor, setAmbientColor] = useState<string>(colors.surface);
   const [importExpanded, setImportExpanded] = useState(false);
   const [wikiText, setWikiText] = useState('');
+  const [loreEntries, setLoreEntries] = useState<LoreEntry[]>([]);
   const addWorld = useArchiveStore((s) => s.addWorld);
 
   // Auto-derive ambient color from name
@@ -34,7 +36,7 @@ export default function CreateWorldScreen({ navigation }: Props) {
     if (name.trim()) {
       setAmbientColor(deriveColorFromName(name.trim()));
     }
-  }, [name.trim()]);
+  }, [name]);
 
   function parseWorldWiki(text: string): { name: string; lore: string } | null {
     // Strategy 1: First header as name, rest as lore
@@ -78,6 +80,7 @@ export default function CreateWorldScreen({ navigation }: Props) {
         emoji: emoji.trim() || '🌍',
         lore: lore.trim(),
         ambientColor,
+        loreEntries: loreEntries.length > 0 ? loreEntries : undefined,
       });
       Alert.alert('保存成功', `${name.trim()} 已加入图鉴`);
       navigation.goBack();
@@ -89,7 +92,7 @@ export default function CreateWorldScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
+      style={[styles.container, { backgroundColor: colors.background }]}
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
     >
       <View style={styles.header}>
@@ -127,7 +130,7 @@ export default function CreateWorldScreen({ navigation }: Props) {
               />
               <View style={styles.importActions}>
                 <TouchableOpacity style={styles.importBtn} onPress={handleImport} disabled={!wikiText.trim()}>
-                  <Text style={styles.importBtnText}>解析并填入</Text>
+                  <Text style={[styles.importBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>解析并填入</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.cancelImportBtn} onPress={() => { setImportExpanded(false); setWikiText(''); }}>
                   <Text style={styles.cancelImportText}>取消</Text>
@@ -165,6 +168,40 @@ export default function CreateWorldScreen({ navigation }: Props) {
         <Field label="图标 (Emoji)" value={emoji} onChangeText={setEmoji} placeholder="🌍" />
         <Field label="名称" value={name} onChangeText={setName} placeholder="世界观名称" required />
         <Field label="设定" value={lore} onChangeText={setLore} placeholder="描述这个世界的规则、历史、氛围…" multiline />
+
+        {/* Lore Entries */}
+        <View style={styles.loreSection}>
+          <View style={styles.loreHeader}>
+            <Text style={styles.loreLabel}>世界书词条</Text>
+            <TouchableOpacity
+              style={styles.loreAddBtn}
+              onPress={() => {
+                setLoreEntries((prev) => [
+                  ...prev,
+                  { id: `le_${Date.now()}`, isGlobal: false, keywords: [], content: '' },
+                ]);
+              }}
+            >
+              <Text style={styles.loreAddBtnText}>+ 添加</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.loreHint}>
+            全局词条每次对话自动注入；关键词词条在近期消息匹配时注入。
+          </Text>
+          {loreEntries.map((entry, idx) => (
+            <LoreEntryCard
+              key={entry.id}
+              entry={entry}
+              onUpdate={(updated) => {
+                setLoreEntries((prev) => prev.map((e, i) => (i === idx ? updated : e)));
+              }}
+              onDelete={() => {
+                setLoreEntries((prev) => prev.filter((_, i) => i !== idx));
+              }}
+            />
+          ))}
+        </View>
+
         <View style={styles.bottomSpacer} />
       </ScrollView>
     </KeyboardAvoidingView>
@@ -370,6 +407,34 @@ const styles = StyleSheet.create({
   },
   inputMultiline: {
     minHeight: 80,
+  },
+  loreSection: {
+    marginBottom: spacing.xl,
+  },
+  loreHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  loreLabel: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+  },
+  loreAddBtn: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  loreAddBtnText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  loreHint: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+    marginBottom: spacing.md,
+    lineHeight: 18,
   },
   bottomSpacer: {
     height: spacing.xxl,

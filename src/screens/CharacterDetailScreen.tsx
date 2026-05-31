@@ -14,6 +14,7 @@ import { RootStackParamList } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
+import { AMBIENT_SWATCHES } from '../utils/ambientColor';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CharacterDetail'>;
 
@@ -22,7 +23,7 @@ function isImageUri(uri: string): boolean {
 }
 
 export default function CharacterDetailScreen({ route, navigation }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { characterId } = route.params;
   const characters = useArchiveStore((s) => s.characters);
   const updateCharacter = useArchiveStore((s) => s.updateCharacter);
@@ -33,6 +34,9 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
   const [editName, setEditName] = useState(character?.name || '');
   const [editCoreSetting, setEditCoreSetting] = useState(character?.coreSetting || '');
   const [editAvatar, setEditAvatar] = useState(character?.avatar || '');
+  const [editAmbientColor, setEditAmbientColor] = useState(character?.ambientColor || colors.surface);
+  const [editActivityLevel, setEditActivityLevel] = useState(character?.activityLevel ?? 5);
+  const [advancedExpanded, setAdvancedExpanded] = useState(false);
 
   // Re-sync when character changes
   React.useEffect(() => {
@@ -40,8 +44,10 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
       setEditName(character.name);
       setEditCoreSetting(character.coreSetting);
       setEditAvatar(character.avatar);
+      setEditAmbientColor(character.ambientColor || colors.surface);
+      setEditActivityLevel(character.activityLevel ?? 5);
     }
-  }, [character]);
+  }, [character, colors.surface]);
 
   if (!character) {
     return (
@@ -60,6 +66,8 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
       name: editName.trim(),
       coreSetting: editCoreSetting.trim(),
       avatar: editAvatar.trim() || character.avatar,
+      ambientColor: editAmbientColor,
+      activityLevel: editActivityLevel,
     });
     setEditing(false);
   };
@@ -79,7 +87,7 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ 返回</Text>
@@ -100,7 +108,7 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
         )}
       </View>
 
-      <View style={styles.hero}>
+      <View style={[styles.hero, !editing && character.ambientColor && { borderBottomWidth: 4, borderBottomColor: character.ambientColor }]}>
         {isImageUri(editing ? editAvatar : character.avatar) ? (
           <Image source={{ uri: editing ? editAvatar : character.avatar }} style={styles.avatarImage} />
         ) : (
@@ -145,9 +153,74 @@ export default function CharacterDetailScreen({ route, navigation }: Props) {
         <Section label="核心设定" value={character.coreSetting} />
       )}
 
+      {/* Card color — always visible in edit mode */}
+      {editing && (
+        <View style={styles.section}>
+          <Text style={styles.sectionLabel}>卡片颜色</Text>
+          <View style={styles.colorSwatches}>
+            {AMBIENT_SWATCHES.map((swatch) => (
+              <TouchableOpacity
+                key={swatch}
+                style={[
+                  styles.colorSwatch,
+                  { backgroundColor: swatch },
+                  editAmbientColor === swatch && styles.colorSwatchSelected,
+                ]}
+                onPress={() => setEditAmbientColor(swatch)}
+              >
+                {editAmbientColor === swatch && <Text style={styles.colorCheckMark}>✓</Text>}
+              </TouchableOpacity>
+            ))}
+            {/* Custom color swatch */}
+            <TouchableOpacity
+              style={[
+                styles.colorSwatch,
+                { backgroundColor: editAmbientColor },
+                !AMBIENT_SWATCHES.includes(editAmbientColor as any) && styles.colorSwatchSelected,
+              ]}
+              onPress={() => setEditAmbientColor(editAmbientColor)}
+            >
+              {!AMBIENT_SWATCHES.includes(editAmbientColor as any) && <Text style={styles.colorCheckMark}>✓</Text>}
+            </TouchableOpacity>
+          </View>
+        </View>
+      )}
+
+      {/* Advanced settings — collapsed by default in edit mode */}
+      {editing && !advancedExpanded && (
+        <TouchableOpacity style={styles.advancedToggle} onPress={() => setAdvancedExpanded(true)}>
+          <Text style={styles.advancedToggleText}>› 高阶设定</Text>
+        </TouchableOpacity>
+      )}
+      {editing && advancedExpanded && (
+        <View style={styles.advancedSection}>
+          <Text style={styles.sectionLabel}>发言积极性</Text>
+          <View style={styles.activityOptions}>
+            {[
+              { label: '沉默寡言', value: 2 },
+              { label: '普通', value: 5 },
+              { label: '话痨抢答', value: 8 },
+            ].map((opt) => (
+              <TouchableOpacity
+                key={opt.value}
+                style={[styles.activityChip, editActivityLevel === opt.value && styles.activityChipSelected]}
+                onPress={() => setEditActivityLevel(opt.value)}
+              >
+                <Text style={[styles.activityChipText, editActivityLevel === opt.value && styles.activityChipTextSelected]}>
+                  {opt.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
+          <TouchableOpacity style={styles.advancedCollapse} onPress={() => setAdvancedExpanded(false)}>
+            <Text style={styles.advancedCollapseText}>收起</Text>
+          </TouchableOpacity>
+        </View>
+      )}
+
       {!editing && (
         <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
-          <Text style={styles.deleteText}>删除角色</Text>
+          <Text style={[styles.deleteText, { color: isDark ? '#EF4444' : '#CC4444' }]}>删除角色</Text>
         </TouchableOpacity>
       )}
 
@@ -221,6 +294,7 @@ const styles = StyleSheet.create({
   hero: {
     alignItems: 'center',
     marginBottom: spacing.xxl,
+    paddingBottom: spacing.sm,
   },
   avatar: {
     fontSize: 48,
@@ -298,5 +372,79 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: spacing.xxl,
+  },
+  // Color swatches
+  colorSwatches: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+    justifyContent: 'center',
+    marginBottom: spacing.xs,
+  },
+  colorSwatch: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  colorSwatchSelected: {
+    borderWidth: 2,
+    borderColor: colors.text.primary,
+  },
+  colorCheckMark: {
+    fontSize: 12,
+    color: '#000',
+  },
+  // Advanced settings
+  advancedToggle: {
+    paddingVertical: spacing.sm,
+    alignItems: 'center',
+  },
+  advancedToggleText: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+  },
+  advancedSection: {
+    marginTop: spacing.lg,
+    paddingBottom: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.separator,
+  },
+  activityOptions: {
+    flexDirection: 'row',
+    gap: spacing.sm,
+  },
+  activityChip: {
+    flex: 1,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    alignItems: 'center',
+    backgroundColor: colors.surface,
+  },
+  activityChipSelected: {
+    borderColor: colors.text.primary,
+    backgroundColor: colors.background,
+  },
+  activityChipText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  activityChipTextSelected: {
+    color: colors.text.primary,
+  },
+  advancedCollapse: {
+    marginTop: spacing.sm,
+    alignSelf: 'center',
+    paddingVertical: spacing.xs,
+  },
+  advancedCollapseText: {
+    ...typography.caption,
+    color: colors.text.tertiary,
   },
 });

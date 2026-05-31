@@ -4,6 +4,7 @@ import {
   Keyboard,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   TouchableOpacity,
@@ -14,6 +15,7 @@ import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
+import { lightImpact } from '../utils/haptics';
 import { spacing, typography } from '../constants/theme';
 import { deriveColorFromName } from '../utils/ambientColor';
 
@@ -38,6 +40,7 @@ export default function SettingsScreen() {
   const temperature = useSettingsStore((s) => s.temperature);
   const maxTokens = useSettingsStore((s) => s.maxTokens);
   const contextWindow = useSettingsStore((s) => s.contextWindow);
+  const colorScheme = useSettingsStore((s) => s.colorScheme);
   const availableModels = useSettingsStore((s) => s.availableModels);
   const fetchingModels = useSettingsStore((s) => s.fetchingModels);
   const setApiKey = useSettingsStore((s) => s.setApiKey);
@@ -46,6 +49,7 @@ export default function SettingsScreen() {
   const setTemperature = useSettingsStore((s) => s.setTemperature);
   const setMaxTokens = useSettingsStore((s) => s.setMaxTokens);
   const setContextWindow = useSettingsStore((s) => s.setContextWindow);
+  const setColorScheme = useSettingsStore((s) => s.setColorScheme);
   const fetchModels = useSettingsStore((s) => s.fetchModels);
   const load = useSettingsStore((s) => s.load);
 
@@ -56,9 +60,16 @@ export default function SettingsScreen() {
   const [inputMaxTokens, setInputMaxTokens] = useState('1000');
   const [inputContextWindow, setInputContextWindow] = useState('20');
   const [showModelDropdown, setShowModelDropdown] = useState(false);
+  const [savedField, setSavedField] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
 
-  useEffect(() => { load(); }, []);
+  const triggerSavedFeedback = (field: string) => {
+    setSavedField(field);
+    lightImpact();
+    setTimeout(() => setSavedField(null), 1500);
+  };
+
+  useEffect(() => { load(); }, [load]);
   useEffect(() => { setInputKey(apiKey ?? ''); }, [apiKey]);
   useEffect(() => { setInputUrl(baseUrl ?? ''); }, [baseUrl]);
   useEffect(() => { setInputModel(model ?? ''); }, [model]);
@@ -114,8 +125,8 @@ export default function SettingsScreen() {
       <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
         <Text style={[styles.title, { color: colors.text.primary }]}>设置</Text>
 
-        <Field label="API Key" value={inputKey} onChangeText={setInputKey} onSave={() => setApiKey(inputKey)} placeholder="sk-..." secureTextEntry colors={colors} />
-        <Field label="Base URL" value={inputUrl} onChangeText={setInputUrl} onSave={() => setBaseUrl(inputUrl)} placeholder="https://api.example.com/v1" colors={colors} />
+        <Field label="API Key" value={inputKey} onChangeText={setInputKey} onSave={() => { setApiKey(inputKey); triggerSavedFeedback('apiKey'); }} placeholder="sk-..." secureTextEntry colors={colors} />
+        <Field label="Base URL" value={inputUrl} onChangeText={setInputUrl} onSave={() => { setBaseUrl(inputUrl); triggerSavedFeedback('baseUrl'); }} placeholder="https://api.example.com/v1" colors={colors} />
 
         {/* Model selector with dropdown */}
         <View style={styles.section}>
@@ -163,8 +174,10 @@ export default function SettingsScreen() {
               onBlur={() => setTimeout(() => setShowModelDropdown(false), 200)}
             />
             {inputModel.trim() ? (
-              <TouchableOpacity style={styles.saveBtn} onPress={() => setModel(inputModel)}>
-                <Text style={[styles.saveBtnText, { color: colors.text.primary }]}>保存</Text>
+              <TouchableOpacity style={styles.saveBtn} onPress={() => { setModel(inputModel); triggerSavedFeedback('model'); }}>
+                <Text style={[styles.saveBtnText, savedField === 'model' && { color: '#34D399' }]}>
+                  {savedField === 'model' ? '已保存' : '保存'}
+                </Text>
               </TouchableOpacity>
             ) : null}
           </View>
@@ -202,8 +215,10 @@ export default function SettingsScreen() {
                 placeholderTextColor={colors.text.tertiary}
                 keyboardType="numeric"
               />
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveTemp}>
-                <Text style={[styles.saveBtnText, { color: colors.text.primary }]}>保存</Text>
+              <TouchableOpacity style={styles.saveBtn} onPress={() => { handleSaveTemp(); triggerSavedFeedback('temp'); }}>
+                <Text style={[styles.saveBtnText, savedField === 'temp' && { color: '#34D399' }]}>
+                  {savedField === 'temp' ? '已保存' : '保存'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -219,8 +234,10 @@ export default function SettingsScreen() {
                 placeholderTextColor={colors.text.tertiary}
                 keyboardType="numeric"
               />
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveMaxTokens}>
-                <Text style={[styles.saveBtnText, { color: colors.text.primary }]}>保存</Text>
+              <TouchableOpacity style={styles.saveBtn} onPress={() => { handleSaveMaxTokens(); triggerSavedFeedback('maxTokens'); }}>
+                <Text style={[styles.saveBtnText, savedField === 'maxTokens' && { color: '#34D399' }]}>
+                  {savedField === 'maxTokens' ? '已保存' : '保存'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -236,11 +253,30 @@ export default function SettingsScreen() {
                 placeholderTextColor={colors.text.tertiary}
                 keyboardType="numeric"
               />
-              <TouchableOpacity style={styles.saveBtn} onPress={handleSaveContextWindow}>
-                <Text style={[styles.saveBtnText, { color: colors.text.primary }]}>保存</Text>
+              <TouchableOpacity style={styles.saveBtn} onPress={() => { handleSaveContextWindow(); triggerSavedFeedback('contextWindow'); }}>
+                <Text style={[styles.saveBtnText, savedField === 'contextWindow' && { color: '#34D399' }]}>
+                  {savedField === 'contextWindow' ? '已保存' : '保存'}
+                </Text>
               </TouchableOpacity>
             </View>
           </View>
+        </View>
+
+        {/* Appearance */}
+        <View style={styles.section}>
+          <Text style={[styles.sectionTitle, { color: colors.text.secondary }]}>外观</Text>
+          <View style={styles.appearanceRow}>
+            <Text style={[styles.appearanceLabel, { color: colors.text.primary }]}>深色模式</Text>
+            <Switch
+              value={colorScheme === 'dark'}
+              onValueChange={(v) => { setColorScheme(v ? 'dark' : 'light'); lightImpact(); }}
+              trackColor={{ false: colors.separator, true: colors.accent }}
+              thumbColor={colors.text.primary}
+            />
+          </View>
+          <Text style={[styles.appearanceHint, { color: colors.text.tertiary }]}>
+            当前：{colorScheme === 'system' ? '跟随系统' : colorScheme === 'dark' ? '深色' : '浅色'}
+          </Text>
         </View>
 
         {/* Agentic Import */}
@@ -268,7 +304,7 @@ export default function SettingsScreen() {
 }
 
 function AgenticImportSection() {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const addCharacter = useArchiveStore((s) => s.addCharacter);
   const [wikiText, setWikiText] = useState('');
   const [importing, setImporting] = useState(false);
@@ -376,7 +412,7 @@ function AgenticImportSection() {
       />
       <View style={styles.importActions}>
         <TouchableOpacity style={[styles.importBtn, { backgroundColor: colors.text.primary }]} onPress={handleImport} disabled={importing || !wikiText.trim()}>
-          <Text style={styles.importBtnText}>{importing ? '解析中...' : '导入'}</Text>
+          <Text style={[styles.importBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>{importing ? '解析中...' : '导入'}</Text>
         </TouchableOpacity>
         <TouchableOpacity style={styles.cancelImportBtn} onPress={() => { setExpanded(false); setWikiText(''); }}>
           <Text style={[styles.cancelImportText, { color: colors.text.tertiary }]}>收起</Text>
@@ -403,6 +439,15 @@ function Field({
   secureTextEntry?: boolean;
   colors: ReturnType<typeof import('../hooks/useTheme').useTheme>['colors'];
 }) {
+  const [saved, setSaved] = useState(false);
+
+  const handleSave = () => {
+    onSave();
+    setSaved(true);
+    lightImpact();
+    setTimeout(() => setSaved(false), 1500);
+  };
+
   return (
     <View style={styles.section}>
       <Text style={[styles.sectionTitle, { color: colors.text.secondary }]}>{label}</Text>
@@ -416,8 +461,10 @@ function Field({
         blurOnSubmit
       />
       {value.trim() ? (
-        <TouchableOpacity style={styles.saveBtn} onPress={onSave}>
-          <Text style={[styles.saveBtnText, { color: colors.text.primary }]}>保存</Text>
+        <TouchableOpacity style={styles.saveBtn} onPress={handleSave}>
+          <Text style={[styles.saveBtnText, saved && { color: '#34D399' }]}>
+            {saved ? '已保存' : '保存'}
+          </Text>
         </TouchableOpacity>
       ) : null}
     </View>
@@ -528,6 +575,19 @@ const styles = StyleSheet.create({
   noteText: {
     ...typography.caption,
     lineHeight: 20,
+  },
+  appearanceRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: spacing.xs,
+  },
+  appearanceLabel: {
+    ...typography.body,
+    fontWeight: '400',
+  },
+  appearanceHint: {
+    ...typography.caption,
   },
   bottomSpacer: {
     height: spacing.xxl,

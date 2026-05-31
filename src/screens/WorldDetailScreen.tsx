@@ -9,15 +9,16 @@ import {
   View,
 } from 'react-native';
 import { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { RootStackParamList } from '../types';
+import { RootStackParamList, LoreEntry } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
+import { LoreEntryCard, LoreEntryViewer } from '../components/LoreEntryCard';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'WorldDetail'>;
 
 export default function WorldDetailScreen({ route, navigation }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const { worldId } = route.params;
   const worlds = useArchiveStore((s) => s.worlds);
   const updateWorld = useArchiveStore((s) => s.updateWorld);
@@ -28,12 +29,14 @@ export default function WorldDetailScreen({ route, navigation }: Props) {
   const [editName, setEditName] = React.useState(world?.name || '');
   const [editEmoji, setEditEmoji] = React.useState(world?.emoji || '');
   const [editLore, setEditLore] = React.useState(world?.lore || '');
+  const [editEntries, setEditEntries] = React.useState<LoreEntry[]>(world?.loreEntries || []);
 
   React.useEffect(() => {
     if (world) {
       setEditName(world.name);
       setEditEmoji(world.emoji);
       setEditLore(world.lore);
+      setEditEntries(world.loreEntries || []);
     }
   }, [world]);
 
@@ -54,6 +57,7 @@ export default function WorldDetailScreen({ route, navigation }: Props) {
       name: editName.trim(),
       emoji: editEmoji.trim() || world.emoji,
       lore: editLore.trim(),
+      loreEntries: editEntries,
     });
     setEditing(false);
   };
@@ -73,7 +77,7 @@ export default function WorldDetailScreen({ route, navigation }: Props) {
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={[styles.container, { backgroundColor: colors.background }]} contentContainerStyle={styles.content}>
       <View style={styles.headerRow}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
           <Text style={styles.backText}>‹ 返回</Text>
@@ -137,9 +141,46 @@ export default function WorldDetailScreen({ route, navigation }: Props) {
         <Section label="设定" value={world.lore} />
       )}
 
+      {/* Lore Entries (世界书) */}
+      {editing ? (
+        <View style={styles.section}>
+          <View style={styles.loreHeader}>
+            <Text style={styles.sectionLabel}>世界书词条</Text>
+            <TouchableOpacity
+              style={styles.loreAddBtn}
+              onPress={() => {
+                setEditEntries((prev) => [
+                  ...prev,
+                  { id: `le_${Date.now()}`, isGlobal: false, keywords: [], content: '' },
+                ]);
+              }}
+            >
+              <Text style={styles.loreAddBtnText}>+ 添加</Text>
+            </TouchableOpacity>
+          </View>
+          <Text style={styles.loreHint}>
+            全局词条每次对话自动注入；关键词词条在近期消息匹配时注入。
+          </Text>
+          {editEntries.map((entry, idx) => (
+            <LoreEntryCard
+              key={entry.id}
+              entry={entry}
+              onUpdate={(updated) => {
+                setEditEntries((prev) => prev.map((e, i) => (i === idx ? updated : e)));
+              }}
+              onDelete={() => {
+                setEditEntries((prev) => prev.filter((_, i) => i !== idx));
+              }}
+            />
+          ))}
+        </View>
+      ) : (
+        <LoreEntryViewer entries={world.loreEntries || []} />
+      )}
+
       {!editing && (
         <TouchableOpacity style={styles.deleteBtn} onPress={handleDelete}>
-          <Text style={styles.deleteText}>删除世界观</Text>
+          <Text style={[styles.deleteText, { color: isDark ? '#EF4444' : '#CC4444' }]}>删除世界观</Text>
         </TouchableOpacity>
       )}
 
@@ -275,5 +316,26 @@ const styles = StyleSheet.create({
   },
   bottomSpacer: {
     height: spacing.xxl,
+  },
+  loreHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: spacing.xs,
+  },
+  loreAddBtn: {
+    paddingVertical: spacing.xs,
+    paddingHorizontal: spacing.sm,
+  },
+  loreAddBtnText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+    fontWeight: '500',
+  },
+  loreHint: {
+    ...typography.caption,
+    color: colors.text.tertiary,
+    marginBottom: spacing.md,
+    lineHeight: 18,
   },
 });

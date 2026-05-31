@@ -3,7 +3,7 @@ import { ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View, Alert 
 import { useNavigation } from '@react-navigation/native';
 import { useSettingsStore } from '../stores/useSettingsStore';
 import { useArchiveStore } from '../stores/useArchiveStore';
-import { assembleSystemPrompt, AVAILABLE_VARIABLES, DEFAULT_SYSTEM_PROMPT, DEFAULT_TEMPLATE_WITH_VARS } from '../services/api/promptAssembler';
+import { assembleSystemPrompt, AVAILABLE_VARIABLES, DEFAULT_TEMPLATE_WITH_VARS } from '../services/api/promptAssembler';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
 

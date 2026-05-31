@@ -101,11 +101,12 @@ function parseWikiText(text: string): Array<{ name: string; coreSetting: string 
 }
 
 export default function CreateCharacterScreen({ navigation }: Props) {
-  const { colors } = useTheme();
+  const { colors, isDark } = useTheme();
   const [name, setName] = useState('');
   const [avatarUri, setAvatarUri] = useState<string | null>(null);
   const [coreSetting, setCoreSetting] = useState('');
-  const [ambientColor, setAmbientColor] = useState<string>(colors.surface);
+  const surfaceColor = colors.surface;
+  const [ambientColor, setAmbientColor] = useState<string>(surfaceColor);
   const [importExpanded, setImportExpanded] = useState(false);
   const [wikiText, setWikiText] = useState('');
   const [advancedExpanded, setAdvancedExpanded] = useState(false);
@@ -127,14 +128,14 @@ export default function CreateCharacterScreen({ navigation }: Props) {
   const predictedColor = useMemo(() => {
     return trimmedName
       ? deriveColorFromEmoji(predictedEmoji)
-      : colors.surface;
-  }, [predictedEmoji, trimmedName]);
+      : surfaceColor;
+  }, [predictedEmoji, trimmedName, surfaceColor]);
 
   useEffect(() => {
-    if (ambientColor === colors.surface && trimmedName) {
+    if (ambientColor === surfaceColor && trimmedName) {
       setAmbientColor(predictedColor);
     }
-  }, [predictedColor, trimmedName]);
+  }, [predictedColor, trimmedName, ambientColor, surfaceColor]);
 
   const handlePickImage = async () => {
     const result = await ImagePicker.launchImageLibraryAsync({
@@ -233,8 +234,9 @@ export default function CreateCharacterScreen({ navigation }: Props) {
 
   return (
     <KeyboardAvoidingView
-      style={styles.container}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      style={[styles.container, { backgroundColor: colors.background }]}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 0}
     >
       <View style={styles.header}>
         <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backBtn}>
@@ -271,7 +273,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
               />
               <View style={styles.importActions}>
                 <TouchableOpacity style={styles.importBtn} onPress={handleImport} disabled={!wikiText.trim()}>
-                  <Text style={styles.importBtnText}>解析并导入</Text>
+                  <Text style={[styles.importBtnText, { color: isDark ? '#000000' : '#FFFFFF' }]}>解析并导入</Text>
                 </TouchableOpacity>
                 <TouchableOpacity style={styles.cancelImportBtn} onPress={() => { setImportExpanded(false); setWikiText(''); }}>
                   <Text style={styles.cancelImportText}>取消</Text>
