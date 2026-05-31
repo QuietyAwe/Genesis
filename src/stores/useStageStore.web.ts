@@ -74,29 +74,6 @@ function filterByBranch(messages: ChatMessage[], branchId: string | null): ChatM
 }
 
 /**
- * Find the fork point between two branches.
- * Compares by content+senderId (not ID) to find the true divergence point.
- * Returns the ID of the first message in targetBranch that differs from currentBranch.
- */
-function findForkPointId(allMessages: ChatMessage[], currentBranchId: string, targetBranchId: string): string | null {
-  const currentMsgs = filterByBranch(allMessages, currentBranchId);
-  const targetMsgs = filterByBranch(allMessages, targetBranchId);
-
-  const minLen = Math.min(currentMsgs.length, targetMsgs.length);
-  for (let i = 0; i < minLen; i++) {
-    const isSameContent = currentMsgs[i].content === targetMsgs[i].content
-      && currentMsgs[i].senderId === targetMsgs[i].senderId;
-    if (!isSameContent) {
-      return targetMsgs[i].id;
-    }
-  }
-  if (targetMsgs.length > currentMsgs.length) {
-    return targetMsgs[currentMsgs.length].id;
-  }
-  return null;
-}
-
-/**
  * Find the fork point index in the CURRENT branch (for scroll target).
  * Returns the index of the first message where content diverges.
  */

@@ -50,7 +50,6 @@ export default function StageScreen() {
   const deleteBranch = useStageStore((s) => s.deleteBranch);
   const switchBranch = useStageStore((s) => s.switchBranch);
   const prepareSwitchBranch = useStageStore((s) => s.prepareSwitchBranch);
-  const clearPendingSwitch = useStageStore((s) => s.clearPendingSwitch);
   const getBranches = useStageStore((s) => s.getBranches);
   const pendingSwitch = useStageStore((s) => s.pendingSwitch);
   const forkIndex = useStageStore((s) => s.forkIndex);
@@ -161,6 +160,7 @@ export default function StageScreen() {
   }, [displayedMessages, streamingContent]);
 
   // Scroll-first branch switch: scroll to fork point, then switch branch
+  const switchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!pendingSwitch) return;
     const { targetBranchId, forkIndex: scrollIdx } = pendingSwitch;
@@ -175,15 +175,16 @@ export default function StageScreen() {
         }
       }
       // Switch branch after scroll animation completes
-      const switchTimer = setTimeout(() => {
+      switchTimerRef.current = setTimeout(() => {
         switchBranch(targetBranchId);
       }, scrollIdx > 0 ? 500 : 0);
-
-      return () => clearTimeout(switchTimer);
     }, 100);
 
-    return () => clearTimeout(timer);
-  }, [pendingSwitch, switchBranch, clearPendingSwitch]);
+    return () => {
+      clearTimeout(timer);
+      if (switchTimerRef.current) clearTimeout(switchTimerRef.current);
+    };
+  }, [pendingSwitch, switchBranch]);
 
   // Clear forkIndex after fade-in animation completes
   useEffect(() => {
