@@ -371,7 +371,7 @@ function AgenticImportSection() {
       for (const entry of parsed) {
         await addCharacter({
           name: entry.name,
-          avatar: '🎭',
+          avatar: entry.name.trim().charAt(0),
           coreSetting: entry.coreSetting || `从 Wiki 导入：${entry.name}`,
           activityLevel: 5,
           ambientColor: deriveColorFromName(entry.name),

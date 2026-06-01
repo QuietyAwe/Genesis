@@ -18,21 +18,9 @@ import { RootStackParamList } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
-import { deriveColorFromEmoji, deriveColorFromName, AMBIENT_SWATCHES } from '../utils/ambientColor';
+import { deriveColorFromName, AMBIENT_SWATCHES } from '../utils/ambientColor';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateCharacter'>;
-
-const EMOJI_MAP: Record<string, string> = {
-  A: '🅰️', B: '🅱️', C: '🎶', D: '🎯', E: '✉️', F: '🌸', G: '🌟', H: '🏠',
-  I: '💡', J: '🎭', K: '🔑', L: '🌿', M: '🌙', N: '🎵', O: '🔮', P: '🎨',
-  Q: '👑', R: '🌹', S: '⭐', T: '🗡️', U: '☂️', V: '🎻', W: '🌊', X: '❌',
-  Y: '🌻', Z: '⚡',
-};
-
-function nameToEmoji(name: string): string {
-  const letter = name.charAt(0).toUpperCase();
-  return EMOJI_MAP[letter] || '🎭';
-}
 
 /**
  * Copy image from picker's temp URI to persistent app document directory.
@@ -124,12 +112,12 @@ export default function CreateCharacterScreen({ navigation }: Props) {
 
   // Auto-derive ambient color from name when user hasn't manually selected one
   const trimmedName = name.trim();
-  const predictedEmoji = trimmedName ? nameToEmoji(trimmedName) : '🎭';
+  const predictedAvatar = trimmedName ? trimmedName.charAt(0) : '?';
   const predictedColor = useMemo(() => {
     return trimmedName
-      ? deriveColorFromEmoji(predictedEmoji)
+      ? deriveColorFromName(trimmedName)
       : surfaceColor;
-  }, [predictedEmoji, trimmedName, surfaceColor]);
+  }, [trimmedName, surfaceColor]);
 
   useEffect(() => {
     if (ambientColor === surfaceColor && trimmedName) {
@@ -177,7 +165,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
   const handleSave = async () => {
     if (!name.trim()) return;
     try {
-      const avatar = avatarUri || nameToEmoji(name.trim());
+      const avatar = avatarUri || name.trim().charAt(0);
       await addCharacter({
         name: name.trim(),
         avatar,
@@ -217,7 +205,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
         for (const entry of parsed) {
           await addCharacter({
             name: entry.name,
-            avatar: nameToEmoji(entry.name),
+            avatar: entry.name.trim().charAt(0),
             coreSetting: entry.coreSetting || `从 Wiki 导入：${entry.name}`,
             activityLevel: 5,
             ambientColor: deriveColorFromName(entry.name),
@@ -290,7 +278,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
             {avatarUri ? (
               <Image source={{ uri: avatarUri }} style={styles.avatarImage} />
             ) : (
-              <Text style={styles.avatarPlaceholder}>{predictedEmoji}</Text>
+              <Text style={styles.avatarPlaceholder}>{predictedAvatar}</Text>
             )}
           </TouchableOpacity>
           <TouchableOpacity style={styles.changeAvatarBtn} onPress={handlePickImage}>
@@ -299,7 +287,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
             </Text>
           </TouchableOpacity>
           <Text style={styles.avatarHint}>
-            支持上传图片，未上传时将根据名称首字母自动生成 Emoji
+            支持上传图片，未上传时将取名称首字作为头像
           </Text>
         </View>
 
