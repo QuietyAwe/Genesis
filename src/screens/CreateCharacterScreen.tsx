@@ -1,6 +1,7 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
+  ActivityIndicator,
   Image,
   KeyboardAvoidingView,
   Platform,
@@ -18,6 +19,8 @@ import { RootStackParamList } from '../types';
 import { useArchiveStore } from '../stores/useArchiveStore';
 import { useTheme } from '../hooks/useTheme';
 import { colors, spacing, typography } from '../constants/theme';
+import { streamChat, LLMConfig } from '../services/api/client';
+import * as secureStore from '../services/secureStore';
 import { deriveColorFromName, AMBIENT_SWATCHES } from '../utils/ambientColor';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'CreateCharacter'>;
@@ -109,6 +112,138 @@ export default function CreateCharacterScreen({ navigation }: Props) {
   });
   const updateFormField = (key: keyof typeof formFields, val: string) =>
     setFormFields((prev) => ({ ...prev, [key]: val }));
+
+  // AI character generation
+  const [isGenerating, setIsGenerating] = useState(false);
+  const abortRef = useRef(false);
+
+  const FORM_LABELS: Record<string, string> = {
+    nickname: '昵称', age: '年龄', identity: '身份', appearance: '外貌',
+    personality: '性格', background: '背景', behavior: '行为模式', languageStyle: '语言风格',
+  };
+
+  const hasFormContent = Object.values(formFields).some((v) => v.trim().length > 0) || name.trim().length > 0;
+
+  const callLLMForCharacter = async (mode: 'overwrite' | 'fill') => {
+    const apiKey = await secureStore.getApiKey();
+    const baseUrl = await secureStore.getBaseUrl();
+    const model = await secureStore.getModel();
+    if (!apiKey || !baseUrl) {
+      Alert.alert('提示', '请先在设置中配置 API 密钥和地址');
+      return;
+    }
+
+    setIsGenerating(true);
+    abortRef.current = false;
+
+    const existingInfo = mode === 'fill'
+      ? Object.entries(formFields)
+          .filter(([, v]) => v.trim())
+          .map(([k, v]) => `${FORM_LABELS[k]}: ${v}`)
+          .join('\n')
+      : '';
+
+    const nameInfo = name.trim() ? `角色名称：${name.trim()}\n` : '';
+    const prompt = mode === 'fill'
+      ? `你是一位创意写作助手。以下是角色的部分信息，请基于这些信息补全剩余的空白字段。保持已有信息不变，只填充空缺的部分。请严格以 JSON 格式输出，不要包含任何其他文字。
+
+${nameInfo}${existingInfo}
+
+输出格式（JSON）：
+{
+  "name": "角色名称",
+  "nickname": "昵称/别名",
+  "age": "年龄",
+  "identity": "身份",
+  "appearance": "外貌描述",
+  "personality": "性格描述",
+  "background": "背景设定",
+  "behavior": "行为模式",
+  "languageStyle": "语言风格"
+}`
+      : `你是一位创意写作助手。请随机创作一个有趣的角色，包含以下所有字段。角色可以来自任何题材（古代、现代、奇幻、科幻等）。请严格以 JSON 格式输出，不要包含任何其他文字。
+
+输出格式（JSON）：
+{
+  "name": "角色名称",
+  "nickname": "昵称/别名",
+  "age": "年龄",
+  "identity": "身份",
+  "appearance": "外貌描述",
+  "personality": "性格描述",
+  "background": "背景设定",
+  "behavior": "行为模式",
+  "languageStyle": "语言风格"
+}`;
+
+    const config: LLMConfig = {
+      apiKey, baseUrl, model: model || 'gpt-4o-mini',
+      temperature: 0.9, maxTokens: 800,
+    };
+
+    try {
+      let fullContent = '';
+      const stream = streamChat({ systemPrompt: '你是一位创意写作助手，擅长创作丰富的角色设定。', messages: [{ role: 'user', content: prompt }], config });
+      for await (const chunk of stream) {
+        if (abortRef.current) break;
+        fullContent += chunk;
+      }
+
+      if (abortRef.current) {
+        setIsGenerating(false);
+        return;
+      }
+
+      // Parse JSON from response (handle markdown code blocks)
+      let jsonStr = fullContent.trim();
+      const codeBlockMatch = jsonStr.match(/```(?:json)?\s*([\s\S]*?)```/);
+      if (codeBlockMatch) {
+        jsonStr = codeBlockMatch[1].trim();
+      }
+      // Also try to find raw JSON object
+      const jsonMatch = jsonStr.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonStr = jsonMatch[0];
+      }
+
+      const parsed = JSON.parse(jsonStr);
+
+      if (mode === 'overwrite') {
+        if (parsed.name && !name.trim()) setName(parsed.name);
+      }
+      const newFields = { ...formFields };
+      for (const key of Object.keys(FORM_LABELS)) {
+        if (mode === 'overwrite' || !formFields[key as keyof typeof formFields].trim()) {
+          if (parsed[key]) {
+            newFields[key as keyof typeof formFields] = parsed[key];
+          }
+        }
+      }
+      setFormFields(newFields);
+    } catch (e) {
+      console.error('[CreateCharacter::AI] Generation failed:', e);
+      Alert.alert('生成失败', e instanceof Error ? e.message : 'AI 返回的内容无法解析，请重试');
+    } finally {
+      setIsGenerating(false);
+    }
+  };
+
+  const handleAIGenerate = () => {
+    if (isGenerating) {
+      abortRef.current = true;
+      return;
+    }
+
+    if (hasFormContent) {
+      Alert.alert('AI 补全', '当前已有输入内容，如何处理？', [
+        { text: '取消', style: 'cancel' },
+        { text: '覆盖重新生成', style: 'destructive', onPress: () => callLLMForCharacter('overwrite') },
+        { text: '补全剩余信息', onPress: () => callLLMForCharacter('fill') },
+      ]);
+    } else {
+      callLLMForCharacter('overwrite');
+    }
+  };
 
   useEffect(() => {
     (async () => {
@@ -372,6 +507,24 @@ export default function CreateCharacterScreen({ navigation }: Props) {
             <Text style={[styles.modeBtnText, creationMode === 'free' && styles.modeBtnTextActive]}>自由编辑</Text>
           </TouchableOpacity>
         </View>
+
+        {creationMode === 'form' && (
+          <TouchableOpacity
+            style={[styles.aiBtn, isGenerating && styles.aiBtnActive]}
+            onPress={handleAIGenerate}
+          >
+            {isGenerating ? (
+              <View style={styles.aiBtnRow}>
+                <ActivityIndicator size="small" color={colors.background} />
+                <Text style={[styles.aiBtnText, styles.aiBtnTextActive]}>  生成中…（点击停止）</Text>
+              </View>
+            ) : (
+              <Text style={[styles.aiBtnText, hasFormContent && styles.aiBtnTextHighlight]}>
+                {hasFormContent ? '✨ AI 补全' : '🎲 AI 随机生成'}
+              </Text>
+            )}
+          </TouchableOpacity>
+        )}
 
         {creationMode === 'form' ? (
           <View style={styles.formFields}>
@@ -699,6 +852,34 @@ const styles = StyleSheet.create({
   },
   formFields: {
     marginBottom: spacing.sm,
+  },
+  // AI generate button
+  aiBtn: {
+    marginBottom: spacing.lg,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    alignItems: 'center',
+  },
+  aiBtnActive: {
+    backgroundColor: colors.text.primary,
+    borderColor: colors.text.primary,
+  },
+  aiBtnRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  aiBtnText: {
+    ...typography.body,
+    color: colors.text.secondary,
+  },
+  aiBtnTextActive: {
+    color: colors.background,
+  },
+  aiBtnTextHighlight: {
+    color: colors.text.primary,
   },
   bottomSpacer: {
     height: spacing.xxl,
