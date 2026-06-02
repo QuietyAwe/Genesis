@@ -101,6 +101,15 @@ export default function CreateCharacterScreen({ navigation }: Props) {
   const [activityLevel, setActivityLevel] = useState(5);
   const addCharacter = useArchiveStore((s) => s.addCharacter);
 
+  // Creation mode: form (guided) vs free (raw coreSetting)
+  const [creationMode, setCreationMode] = useState<'form' | 'free'>('form');
+  const [formFields, setFormFields] = useState({
+    nickname: '', age: '', identity: '', appearance: '',
+    personality: '', background: '', behavior: '', languageStyle: '',
+  });
+  const updateFormField = (key: keyof typeof formFields, val: string) =>
+    setFormFields((prev) => ({ ...prev, [key]: val }));
+
   useEffect(() => {
     (async () => {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -162,14 +171,28 @@ export default function CreateCharacterScreen({ navigation }: Props) {
     }
   };
 
+  const assembleFormFields = (): string => {
+    const LABELS: Record<string, string> = {
+      nickname: '昵称', age: '年龄', identity: '身份', appearance: '外貌',
+      personality: '性格', background: '背景', behavior: '行为模式', languageStyle: '语言风格',
+    };
+    const parts: string[] = [];
+    for (const [key, label] of Object.entries(LABELS)) {
+      const val = formFields[key as keyof typeof formFields].trim();
+      if (val) parts.push(`【${label}】${val}`);
+    }
+    return parts.join('\n');
+  };
+
   const handleSave = async () => {
     if (!name.trim()) return;
     try {
       const avatar = avatarUri || name.trim().charAt(0);
+      const finalCoreSetting = creationMode === 'form' ? assembleFormFields() : coreSetting.trim();
       await addCharacter({
         name: name.trim(),
         avatar,
-        coreSetting: coreSetting.trim(),
+        coreSetting: finalCoreSetting,
         activityLevel,
         ambientColor,
       });
@@ -198,6 +221,7 @@ export default function CreateCharacterScreen({ navigation }: Props) {
         const entry = parsed[0];
         setName(entry.name);
         setCoreSetting(entry.coreSetting);
+        setCreationMode('free');
         setWikiText('');
         setImportExpanded(false);
       } else {
@@ -332,7 +356,37 @@ export default function CreateCharacterScreen({ navigation }: Props) {
         </View>
 
         <Field label="名称" value={name} onChangeText={setName} placeholder="角色名称" required />
-        <Field label="核心设定" value={coreSetting} onChangeText={setCoreSetting} placeholder="输入角色的性格、口癖、目标、背景等…" multiline />
+
+        {/* Creation mode toggle */}
+        <View style={styles.modeToggle}>
+          <TouchableOpacity
+            style={[styles.modeBtn, creationMode === 'form' && styles.modeBtnActive]}
+            onPress={() => setCreationMode('form')}
+          >
+            <Text style={[styles.modeBtnText, creationMode === 'form' && styles.modeBtnTextActive]}>填表</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            style={[styles.modeBtn, creationMode === 'free' && styles.modeBtnActive]}
+            onPress={() => setCreationMode('free')}
+          >
+            <Text style={[styles.modeBtnText, creationMode === 'free' && styles.modeBtnTextActive]}>自由编辑</Text>
+          </TouchableOpacity>
+        </View>
+
+        {creationMode === 'form' ? (
+          <View style={styles.formFields}>
+            <Field label="昵称/别名" value={formFields.nickname} onChangeText={(v) => updateFormField('nickname', v)} placeholder='可选，如"小林"' />
+            <Field label="年龄" value={formFields.age} onChangeText={(v) => updateFormField('age', v)} placeholder='可选，如"17岁"' />
+            <Field label="身份" value={formFields.identity} onChangeText={(v) => updateFormField('identity', v)} placeholder='可选，如"高中生、剑士"' />
+            <Field label="外貌" value={formFields.appearance} onChangeText={(v) => updateFormField('appearance', v)} placeholder="身高、发色、服饰等…" multiline />
+            <Field label="性格" value={formFields.personality} onChangeText={(v) => updateFormField('personality', v)} placeholder="温柔、傲娇、冷静…" multiline />
+            <Field label="背景设定" value={formFields.background} onChangeText={(v) => updateFormField('background', v)} placeholder="生活状况、个人经历、社会关系…" multiline />
+            <Field label="行为模式" value={formFields.behavior} onChangeText={(v) => updateFormField('behavior', v)} placeholder="爱好、厌恶、习惯…" multiline />
+            <Field label="语言风格" value={formFields.languageStyle} onChangeText={(v) => updateFormField('languageStyle', v)} placeholder="口癖、语气、话题倾向…" multiline />
+          </View>
+        ) : (
+          <Field label="核心设定" value={coreSetting} onChangeText={setCoreSetting} placeholder="输入角色的性格、口癖、目标、背景等…" multiline />
+        )}
 
         {/* Advanced settings — collapsed by default */}
         {!advancedExpanded ? (
@@ -618,6 +672,33 @@ const styles = StyleSheet.create({
   },
   inputMultiline: {
     minHeight: 100,
+  },
+  // Mode toggle
+  modeToggle: {
+    flexDirection: 'row',
+    marginBottom: spacing.lg,
+    gap: spacing.sm,
+  },
+  modeBtn: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.lg,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  modeBtnActive: {
+    backgroundColor: colors.text.primary,
+    borderColor: colors.text.primary,
+  },
+  modeBtnText: {
+    ...typography.caption,
+    color: colors.text.secondary,
+  },
+  modeBtnTextActive: {
+    color: colors.background,
+  },
+  formFields: {
+    marginBottom: spacing.sm,
   },
   bottomSpacer: {
     height: spacing.xxl,
